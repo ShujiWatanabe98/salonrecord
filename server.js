@@ -70,8 +70,11 @@ async function runOcr(image, template) {
   const fieldGuide = template.fields.map(f => `- ${f.id}: ${f.label}（種類:${f.type}、範囲:x${f.x}% y${f.y}% w${f.w}% h${f.h}%）`).join('\n');
   const prompt = `日本語の手書きサロンカルテを読み取ってください。指定範囲を優先し、推測できない値は空文字にします。JSON以外は出力しません。\n項目:\n${fieldGuide}\n出力形式: {"values":{"項目ID":"読取値"},"confidence":{"項目ID":0から1},"alerts":["アレルギー、赤み、禁忌、注意すべき内容"],"customerName":"氏名","visitDate":"YYYY-MM-DD"}`;
   const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5.6', store: false, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, { type: 'input_image', image_url: image, detail: 'original' }] }] }) });
-  const result = await response.json();
-  if (!response.ok) throw Object.assign(new Error(result.error?.message || 'AI OCRに失敗しました'), { status: response.status });
+  const raw = await response.text();
+  let result;
+  try { result = JSON.parse(raw); } catch { result = null; }
+  if (!response.ok) throw Object.assign(new Error(result?.error?.message || `AI OCRに失敗しました（HTTP ${response.status}）`), { status: response.status });
+  if (!result) throw Object.assign(new Error('AI OCRから不正な応答を受信しました'), { status: 502 });
   return parseModelJson(outputText(result));
 }
 

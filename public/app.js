@@ -1,15 +1,37 @@
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const state = { token: sessionStorage.getItem('salonToken'), user: null, customers: [], templates: [], scan: null, image: '', selectedTemplate: null };
 const pages = { dashboard:['ホーム','今日も心地よいサロンワークを。'],customers:['お客様','カルテと施術履歴を一元管理'],scan:['カルテ読取','手書きカルテをAIでデータ化'],templates:['フォーム設定','店舗のカルテに合わせて読取範囲を設定'] };
-async function api(url, options={}) { const r = await fetch(url,{...options,headers:{'Content-Type':'application/json',Authorization:`Bearer ${state.token}`,...options.headers}}); const data=await r.json(); if(!r.ok) throw new Error(data.error||'エラーが発生しました'); return data; }
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function api(url, options={}, attempt=0) {
+  const method=(options.method||'GET').toUpperCase();
+  let response;
+  try {
+    response=await fetch(url,{...options,headers:{'Content-Type':'application/json',Authorization:`Bearer ${state.token||''}`,...options.headers}});
+  } catch (cause) {
+    if(method==='GET'&&attempt<2){await wait(700*(attempt+1));return api(url,options,attempt+1)}
+    const error=new Error('サーバーに接続できません。通信環境を確認して再度お試しください');error.cause=cause;throw error;
+  }
+  const raw=await response.text();
+  let data=null;
+  if(raw){try{data=JSON.parse(raw)}catch{data=null}}
+  const transient=[404,408,429,502,503,504].includes(response.status)||(/^not found\s*$/i.test(raw.trim()));
+  if(!response.ok&&method==='GET'&&transient&&attempt<2){await wait(700*(attempt+1));return api(url,options,attempt+1)}
+  if(!response.ok){
+    const message=data?.error||(transient?'サーバーが一時的に応答できません。少し待って再度お試しください':`処理に失敗しました（HTTP ${response.status}）`);
+    const error=new Error(message);error.status=response.status;error.responseText=raw.slice(0,120);throw error;
+  }
+  if(response.status===204||!raw)return null;
+  if(data===null){const error=new Error('サーバーから不正な応答を受信しました。再度お試しください');error.status=response.status;throw error}
+  return data;
+}
 function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2500)}
 function esc(v=''){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function fmt(d){if(!d)return '—';const x=new Date(d+'T00:00:00');return `${x.getFullYear()}年${x.getMonth()+1}月${x.getDate()}日`}
 
 $('#loginForm').addEventListener('submit',async e=>{e.preventDefault();$('#loginError').textContent='';try{const b=Object.fromEntries(new FormData(e.target));const r=await api('/api/login',{method:'POST',body:JSON.stringify(b)});state.token=r.token;sessionStorage.setItem('salonToken',r.token);await boot(r.user)}catch(x){$('#loginError').textContent=x.message}});
 $('#logout').onclick=async()=>{try{await api('/api/logout',{method:'POST'})}catch{}sessionStorage.removeItem('salonToken');location.reload()};
-async function boot(user){try{state.user=user||await api('/api/me');$('#login').classList.add('hidden');$('#app').classList.remove('hidden');$('#salonName').textContent=state.user.tenant.name;$('#userName').textContent=state.user.name;$('#userInitial').textContent=state.user.name[0];$('#userRole').textContent=state.user.role==='owner'?'オーナー':'スタッフ';$$('nav button').forEach(b=>b.onclick=()=>show(b.dataset.view));await show('dashboard')}catch{sessionStorage.removeItem('salonToken')}}
-async function show(name){$$('nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===name));$('#pageTitle').textContent=pages[name][0];$('#pageSub').textContent=pages[name][1];$('#content').innerHTML='<div class="empty">読み込み中…</div>';try{await ({dashboard:renderDashboard,customers:renderCustomers,scan:renderScan,templates:renderTemplates}[name])()}catch(e){$('#content').innerHTML=`<div class="card error">${esc(e.message)}</div>`}}
+async function boot(user){try{state.user=user||await api('/api/me');$('#login').classList.add('hidden');$('#app').classList.remove('hidden');$('#salonName').textContent=state.user.tenant.name;$('#userName').textContent=state.user.name;$('#userInitial').textContent=state.user.name[0];$('#userRole').textContent=state.user.role==='owner'?'オーナー':'スタッフ';$$('nav button').forEach(b=>b.onclick=()=>show(b.dataset.view));await show('dashboard')}catch(e){if(e.status===401){sessionStorage.removeItem('salonToken');state.token=null}else{$('#loginError').textContent=e.message}}}
+async function show(name){$$('nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===name));$('#pageTitle').textContent=pages[name][0];$('#pageSub').textContent=pages[name][1];$('#content').innerHTML='<div class="empty">読み込み中…</div>';try{await ({dashboard:renderDashboard,customers:renderCustomers,scan:renderScan,templates:renderTemplates}[name])()}catch(e){if(e.status===401){sessionStorage.removeItem('salonToken');location.reload();return}$('#content').innerHTML=`<div class="card error">${esc(e.message)}<div style="margin-top:14px"><button class="ghost" onclick="show('${name}')">再読み込み</button></div></div>`}}
 async function renderDashboard(){const d=await api('/api/dashboard');$('#content').innerHTML=`<section class="hero"><div><h2>${new Date().getHours()<12?'おはようございます':'お疲れさまです'}、${esc(state.user.name.split(' ')[0])}さん</h2><p>お客様の大切な情報を、今日の施術に活かしましょう。</p></div><button class="primary" onclick="show('scan')">＋ カルテを読み取る</button></section><div class="stats"><div class="card stat"><div><small>登録お客様</small><b>${d.customers}</b> 人</div><i>♙</i></div><div class="card stat"><div><small>今月のカルテ</small><b>${d.recordsThisMonth}</b> 件</div><i>▤</i></div><div class="card stat"><div><small>注意事項あり</small><b>${d.alerts}</b> 人</div><i>!</i></div></div><div class="section-head"><h2>最近の施術記録</h2><button class="link-btn" onclick="show('customers')">すべて見る →</button></div><div class="card">${d.recent.length?d.recent.map(r=>`<div class="record-row"><div class="date-box"><b>${r.visitDate.slice(8)}</b>${Number(r.visitDate.slice(5,7))}月</div><div><b>${esc(r.customer?.name)}</b><small class="muted">${esc(r.staff)} 担当</small></div><div>${esc(r.values.treatment||'施術記録')}</div><div>${r.alerts?.length?'<span class="badge alert">! 注意事項あり</span>':'<span class="badge">確認済み</span>'}</div><button class="ghost" onclick="openCustomer('${r.customerId}')">詳細</button></div>`).join(''):'<div class="empty">まだ記録がありません</div>'}</div>`}
 async function renderCustomers(){state.customers=await api('/api/customers');$('#content').innerHTML=`<div class="searchbar"><input id="customerSearch" placeholder="お名前・電話番号で検索"><button class="primary" id="addCustomer">＋ お客様を登録</button></div><div class="card" id="customerList"></div>`;const draw=()=>{const q=$('#customerSearch').value.toLowerCase();const rows=state.customers.filter(c=>(c.name+c.kana+c.phone).toLowerCase().includes(q));$('#customerList').innerHTML=rows.map(c=>`<div class="customer-row"><div class="avatar">${esc(c.name[0])}</div><div><b>${esc(c.name)}</b><small class="muted">${esc(c.kana)}</small></div><div>${esc(c.phone)}</div><div>${c.alerts.length?`<span class="badge alert">! ${esc(c.alerts[0])}</span>`:'<span class="badge">注意事項なし</span>'}</div><button class="ghost" onclick="openCustomer('${c.id}')">履歴を見る</button></div>`).join('')||'<div class="empty">該当するお客様はいません</div>'};draw();$('#customerSearch').oninput=draw;$('#addCustomer').onclick=addCustomer}
 async function addCustomer(){const name=prompt('お客様のお名前を入力してください');if(!name)return;const phone=prompt('電話番号（任意）')||'';await api('/api/customers',{method:'POST',body:JSON.stringify({name,phone})});toast('お客様を登録しました');renderCustomers()}

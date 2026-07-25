@@ -82,8 +82,12 @@ async function api(req, res, pathname) {
   if (req.method === 'POST' && pathname === '/api/login') {
     const ip = req.socket.remoteAddress || 'unknown';
     if (!loginAllowed(ip)) return json(res, 429, { error: 'ログイン試行回数が多すぎます。15分後にお試しください' });
-    const b = await body(req); const user = db.users.find(x => x.email.toLowerCase() === String(b.email || '').toLowerCase());
-    if (!user || !await storage.verifyPassword(user, b.password)) { recordLoginFailure(ip); return json(res, 401, { error: 'メールアドレスまたはパスワードが違います' }); }
+    const b = await body(req); const email = String(b.email || '').toLowerCase();
+    const candidates = db.users.filter(x => x.email.toLowerCase() === email && (!b.tenantId || x.tenantId === b.tenantId));
+    const verified = (await Promise.all(candidates.map(async user => ({ user, valid: await storage.verifyPassword(user, b.password) })))).filter(x => x.valid).map(x => x.user);
+    if (!verified.length) { recordLoginFailure(ip); return json(res, 401, { error: 'メールアドレスまたはパスワードが違います' }); }
+    if (!b.tenantId && verified.length > 1) return json(res, 409, { error: 'ログインする店舗を選択してください', code: 'TENANT_SELECTION_REQUIRED', tenants: verified.map(user => ({ id: user.tenantId, name: db.tenants.find(t => t.id === user.tenantId)?.name || user.tenantId })) });
+    const user = verified[0];
     loginAttempts.delete(ip); const token = await storage.createSession(user.id); return json(res, 200, { token, user: safeUser(user) });
   }
   if (req.method === 'POST' && pathname === '/api/logout') { await storage.deleteSession(tokenOf(req)); return json(res, 204, {}); }
@@ -139,6 +143,38 @@ async function start() {
   }
   const initialized = await storage.initStorage(ROOT, initial);
   db = initialized.data; storageMode = initialized.mode;
+  await provisionStoresFromEnvironment();
   server.listen(PORT, '0.0.0.0', () => console.log(`SalonRecord started on port ${PORT} (${storageMode})`));
+}
+
+async function provisionStoresFromEnvironment() {
+  if (!process.env.PROVISION_STORES_JSON) return;
+  let stores;
+  try { stores = JSON.parse(process.env.PROVISION_STORES_JSON); } catch { throw new Error('PROVISION_STORES_JSON が正しいJSONではありません'); }
+  if (!Array.isArray(stores) || !stores.length) return;
+  let changed = false;
+  for (let index = 0; index < stores.length; index++) {
+    const spec = stores[index];
+    if (!spec?.name || !spec?.adminName || !spec?.email) throw new Error('店舗設定には name、adminName、email が必要です');
+    let tenant = db.tenants.find(t => t.name === spec.name);
+    let user = tenant && db.users.find(u => u.tenantId === tenant.id && u.email.toLowerCase() === spec.email.toLowerCase());
+    if (!tenant && index === 0) {
+      user = db.users.find(u => u.email.toLowerCase() === spec.email.toLowerCase());
+      tenant = user && db.tenants.find(t => t.id === user.tenantId);
+      if (tenant) { tenant.name = spec.name; user.name = spec.adminName; changed = true; }
+    }
+    if (!tenant) {
+      const sourceUser = db.users.find(u => u.email.toLowerCase() === spec.email.toLowerCase());
+      if (!sourceUser) throw new Error(`${spec.email} の既存管理者が見つかりません`);
+      const suffix = crypto.createHash('sha256').update(`${spec.email}:${spec.name}`).digest('hex').slice(0, 12);
+      tenant = { id: `tenant-${suffix}`, name: spec.name, plan: 'スタンダード' };
+      user = { id: `owner-${suffix}`, tenantId: tenant.id, name: spec.adminName, email: spec.email, passwordHash: sourceUser.passwordHash, role: 'owner' };
+      db.tenants.push(tenant); db.users.push(user);
+      const baseTemplate = db.templates[0] || seed.templates[0];
+      db.templates.push({ ...structuredClone(baseTemplate), id: `template-${suffix}`, tenantId: tenant.id, name: '標準フェイシャルカルテ', updatedAt: new Date().toISOString().slice(0,10) });
+      changed = true;
+    } else if (user && user.name !== spec.adminName) { user.name = spec.adminName; changed = true; }
+  }
+  if (changed) { await save(); console.log(`Provisioned ${stores.length} stores from environment`); }
 }
 start().catch(error => { console.error('Startup failed:', error); process.exit(1); });

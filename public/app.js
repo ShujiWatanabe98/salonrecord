@@ -18,7 +18,7 @@ async function api(url, options={}, attempt=0) {
   if(!response.ok&&method==='GET'&&transient&&attempt<2){await wait(700*(attempt+1));return api(url,options,attempt+1)}
   if(!response.ok){
     const message=data?.error||(transient?'サーバーが一時的に応答できません。少し待って再度お試しください':`処理に失敗しました（HTTP ${response.status}）`);
-    const error=new Error(message);error.status=response.status;error.responseText=raw.slice(0,120);throw error;
+    const error=new Error(message);error.status=response.status;error.responseText=raw.slice(0,120);error.data=data;throw error;
   }
   if(response.status===204||!raw)return null;
   if(data===null){const error=new Error('サーバーから不正な応答を受信しました。再度お試しください');error.status=response.status;throw error}
@@ -28,7 +28,7 @@ function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('sh
 function esc(v=''){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function fmt(d){if(!d)return '—';const x=new Date(d+'T00:00:00');return `${x.getFullYear()}年${x.getMonth()+1}月${x.getDate()}日`}
 
-$('#loginForm').addEventListener('submit',async e=>{e.preventDefault();$('#loginError').textContent='';try{const b=Object.fromEntries(new FormData(e.target));const r=await api('/api/login',{method:'POST',body:JSON.stringify(b)});state.token=r.token;sessionStorage.setItem('salonToken',r.token);await boot(r.user)}catch(x){$('#loginError').textContent=x.message}});
+$('#loginForm').addEventListener('submit',async e=>{e.preventDefault();$('#loginError').textContent='';try{const b=Object.fromEntries(new FormData(e.target));const r=await api('/api/login',{method:'POST',body:JSON.stringify(b)});state.token=r.token;sessionStorage.setItem('salonToken',r.token);await boot(r.user)}catch(x){if(x.data?.code==='TENANT_SELECTION_REQUIRED'){const select=$('#tenantSelect');select.innerHTML=x.data.tenants.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');select.required=true;$('#tenantField').classList.remove('hidden');$('#loginError').textContent='ログインする店舗を選択してください'}else $('#loginError').textContent=x.message}});
 $('#logout').onclick=async()=>{try{await api('/api/logout',{method:'POST'})}catch{}sessionStorage.removeItem('salonToken');location.reload()};
 async function boot(user){try{state.user=user||await api('/api/me');$('#login').classList.add('hidden');$('#app').classList.remove('hidden');$('#salonName').textContent=state.user.tenant.name;$('#userName').textContent=state.user.name;$('#userInitial').textContent=state.user.name[0];$('#userRole').textContent=state.user.role==='owner'?'オーナー':'スタッフ';$$('nav button').forEach(b=>b.onclick=()=>show(b.dataset.view));await show('dashboard')}catch(e){if(e.status===401){sessionStorage.removeItem('salonToken');state.token=null}else{$('#loginError').textContent=e.message}}}
 async function show(name){$$('nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===name));$('#pageTitle').textContent=pages[name][0];$('#pageSub').textContent=pages[name][1];$('#content').innerHTML='<div class="empty">読み込み中…</div>';try{await ({dashboard:renderDashboard,customers:renderCustomers,scan:renderScan,templates:renderTemplates}[name])()}catch(e){if(e.status===401){sessionStorage.removeItem('salonToken');location.reload();return}$('#content').innerHTML=`<div class="card error">${esc(e.message)}<div style="margin-top:14px"><button class="ghost" onclick="show('${name}')">再読み込み</button></div></div>`}}

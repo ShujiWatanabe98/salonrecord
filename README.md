@@ -51,6 +51,8 @@ git push
 4. ルートの`render.yaml`を読み込ませます。
 5. PostgreSQLとWeb Serviceが作成されます。
 
+`render.yaml`は初回公開を試せるようWeb ServiceとPostgreSQLを`free`に設定しています。無料プランの停止、性能、データ保持期限などの制約はRender画面で必ず確認し、本番販売前に有料プランへ変更してください。
+
 ### 3. 秘密の環境変数を入力
 
 Blueprint作成時に、次を入力します。

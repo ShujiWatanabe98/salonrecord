@@ -2,6 +2,7 @@ services:
   - type: web
     name: salonrecord
     runtime: node
+    plan: free
     buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /healthz
@@ -31,5 +32,6 @@ services:
 
 databases:
   - name: salonrecord-db
+    plan: free
     databaseName: salonrecord
     user: salonrecord

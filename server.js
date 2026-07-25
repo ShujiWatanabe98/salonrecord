@@ -121,7 +121,7 @@ const server = http.createServer(async (req, res) => { try {
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
   if (IS_PRODUCTION) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;
-  if (pathname === '/healthz') return json(res, 200, { status: 'ok', ...(await storage.health()) });
+  if (pathname === '/healthz') return json(res, 200, { status: 'ok', ...(await storage.health()), tenantCount: db?.tenants?.length || 0 });
   if (pathname.startsWith('/api/')) await api(req, res, pathname); else staticFile(res, pathname);
 } catch (e) { console.error(e); json(res, e.status || 500, { error: e.message || 'サーバーエラー' }); } });
 

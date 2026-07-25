@@ -154,7 +154,8 @@ async function provisionStoresFromEnvironment() {
   } else if (IS_PRODUCTION && process.env.ADMIN_EMAIL) {
     stores = [
       { name: 'Lycon渋谷店', adminName: 'Aska1', email: process.env.ADMIN_EMAIL },
-      { name: 'Lycon代官山店', adminName: 'Aska2', email: process.env.ADMIN_EMAIL }
+      { name: 'Lycon代官山店', adminName: 'Aska2', email: process.env.ADMIN_EMAIL },
+      { name: 'beaute', adminName: 'Ashaka', email: process.env.ADMIN_EMAIL }
     ];
   } else return;
   if (!Array.isArray(stores) || !stores.length) return;

@@ -1,0 +1,57 @@
+/* LYCON JAPAN inspired common theme: white, charcoal and signature pink. */
+:root {
+  --ink: #424242;
+  --muted: #767676;
+  --green: #cc455e;
+  --dark: #cc455e;
+  --mint: #fff3f3;
+  --cream: #f5f5f5;
+  --line: #ebebeb;
+  --danger: #b73550;
+  --warn: #fff3f3;
+}
+
+body { color: var(--ink); background: #f5f5f5; }
+.login-brand { background: linear-gradient(145deg, #333, #4d4d4d 68%, #cc455e); color: #fff; }
+.login-brand::after { border-color: #ffffff35; box-shadow: 0 0 0 70px #e31c7918, 0 0 0 140px #ffffff0d; }
+.brand-mark, .logo b { background: #fff; color: #e31c79; border: 1px solid #f2d3dc; }
+.login-brand > p { color: #f8e7ec; }
+.feature-list { color: #fff; }
+.login-card { border-top: 4px solid #e31c79; box-shadow: 0 20px 70px #4242421a; }
+.eyebrow { color: #cc455e; }
+
+input, select, textarea { border-color: #ddd; color: #424242; }
+input:focus, select:focus, textarea:focus { border-color: #cc455e; box-shadow: 0 0 0 3px #cc455e20; }
+.primary { background: #cc455e; color: #fff; }
+.primary:hover { background: #b63851; }
+
+aside { background: #424242; }
+nav button, .logout { color: #e1e1e1; }
+nav button:hover, nav button.active { background: #cc455e; color: #fff; }
+.salon-pill { border-top-color: #ffffff2b; }
+.salon-pill i { background: #e31c79; }
+.logo small { color: #f1cbd4; }
+
+header { background: #fff; border-bottom-color: #ebebeb; }
+.user-chip > span { background: #fff3f3; color: #cc455e; }
+.hero { background: linear-gradient(120deg, #fff0f3, #fff 68%); border-left: 4px solid #e31c79; }
+.card { border-color: #ebebeb; box-shadow: 0 3px 18px #4242420b; }
+.stat i, .date-box, .avatar { background: #fff3f3; color: #cc455e; }
+.link-btn, .ghost { border-color: #e7c9d0; color: #cc455e; }
+.link-btn:hover, .ghost:hover { background: #fff3f3; }
+.badge { background: #fff0f3; color: #b73550; }
+.badge.alert { background: #fde8ed; color: #a52f49; }
+.alert-box { background: #fff3f3; border-color: #efc6d0; }
+.alert-box b { color: #b73550; }
+
+.timeline { border-left-color: #f0cbd4; }
+.timeline .card::before { background: #e31c79; border-color: #f5f5f5; }
+.dropzone { border-color: #e1a9b7; background: #fffafa; }
+.dropzone .empty-icon { color: #cc455e; }
+.progress { background: #f5dce2; }
+.progress i { background: linear-gradient(90deg, #cc455e, #e31c79); }
+.template-paper { box-shadow: 0 10px 35px #42424218; background-image: linear-gradient(#f1e4e7 1px, transparent 1px); }
+.zone { border-color: #cc455e; background: #e31c7917; color: #9f3048; }
+.zone.selected { border-color: #e31c79; background: #e31c7928; }
+.field-item.selected { border-color: #cc455e; background: #fff6f8; }
+.toast { background: #424242; border-left: 4px solid #e31c79; }

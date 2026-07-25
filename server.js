@@ -148,9 +148,15 @@ async function start() {
 }
 
 async function provisionStoresFromEnvironment() {
-  if (!process.env.PROVISION_STORES_JSON) return;
   let stores;
-  try { stores = JSON.parse(process.env.PROVISION_STORES_JSON); } catch { throw new Error('PROVISION_STORES_JSON が正しいJSONではありません'); }
+  if (process.env.PROVISION_STORES_JSON) {
+    try { stores = JSON.parse(process.env.PROVISION_STORES_JSON); } catch { throw new Error('PROVISION_STORES_JSON が正しいJSONではありません'); }
+  } else if (IS_PRODUCTION && process.env.ADMIN_EMAIL) {
+    stores = [
+      { name: 'Lycon渋谷店', adminName: 'Aska1', email: process.env.ADMIN_EMAIL },
+      { name: 'Lycon代官山店', adminName: 'Aska2', email: process.env.ADMIN_EMAIL }
+    ];
+  } else return;
   if (!Array.isArray(stores) || !stores.length) return;
   let changed = false;
   for (let index = 0; index < stores.length; index++) {
@@ -175,6 +181,6 @@ async function provisionStoresFromEnvironment() {
       changed = true;
     } else if (user && user.name !== spec.adminName) { user.name = spec.adminName; changed = true; }
   }
-  if (changed) { await save(); console.log(`Provisioned ${stores.length} stores from environment`); }
+  if (changed) { await save(); console.log(`Provisioned ${stores.length} stores`); }
 }
 start().catch(error => { console.error('Startup failed:', error); process.exit(1); });

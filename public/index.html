@@ -3,7 +3,7 @@
 <body>
 <div id="login" class="login-wrap">
   <section class="login-brand"><div class="brand-mark">S</div><h1>SalonRecord</h1><p>紙のカルテを、次の接客につながる記録へ。</p><div class="feature-list"><span>✦ AI手書きカルテ読取</span><span>✦ お客様ごとの施術履歴</span><span>✦ アレルギー・注意事項を自動通知</span></div></section>
-  <form id="loginForm" class="login-card"><div class="eyebrow">SALON WORKSPACE</div><h2>おかえりなさい</h2><p class="muted">店舗アカウントにログインしてください</p><label>メールアドレス<input name="email" type="email" value="owner@lumiere.jp" required></label><label>パスワード<input name="password" type="password" value="demo123" required></label><button class="primary wide">ログイン</button><div class="demo-note">デモ：owner@lumiere.jp / demo123</div><p id="loginError" class="error"></p></form>
+  <form id="loginForm" class="login-card"><div class="eyebrow">SALON WORKSPACE</div><h2>おかえりなさい</h2><p class="muted">店舗アカウントにログインしてください</p><label>メールアドレス<input name="email" type="email" autocomplete="username" required></label><label>パスワード<input name="password" type="password" autocomplete="current-password" required></label><button class="primary wide">ログイン</button><div class="demo-note">管理者から発行されたアカウントをご利用ください</div><p id="loginError" class="error"></p></form>
 </div>
 <div id="app" class="app hidden">
   <aside><div class="logo"><b>S</b><span>SalonRecord<small>カルテ管理</small></span></div><nav><button data-view="dashboard" class="active">⌂<span>ホーム</span></button><button data-view="customers">♙<span>お客様</span></button><button data-view="scan">▣<span>カルテ読取</span></button><button data-view="templates">▤<span>フォーム設定</span></button></nav><div class="side-bottom"><div class="salon-pill"><i></i><span id="salonName"></span></div><button id="logout" class="logout">ログアウト</button></div></aside>

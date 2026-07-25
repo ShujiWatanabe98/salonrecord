@@ -110,7 +110,7 @@ async function api(req, res, pathname) {
 function staticFile(res, pathname) {
   const wanted = pathname === '/' ? 'index.html' : pathname.slice(1); const file = path.normalize(path.join(ROOT, 'public', wanted));
   if (!file.startsWith(path.join(ROOT, 'public'))) { res.writeHead(403); return res.end(); }
-  fs.readFile(file, (err, data) => { if (err) { res.writeHead(404); return res.end('Not found'); } const ext = path.extname(file); const types = { '.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml' }; res.writeHead(200, { 'Content-Type': types[ext] || 'application/octet-stream' }); res.end(data); });
+  fs.readFile(file, (err, data) => { if (err) { res.writeHead(404); return res.end('Not found'); } const ext = path.extname(file); const types = { '.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml' }; const headers = { 'Content-Type': types[ext] || 'application/octet-stream' }; if (['.html','.css','.js'].includes(ext)) headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'; res.writeHead(200, headers); res.end(data); });
 }
 const server = http.createServer(async (req, res) => { try {
   res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('X-Frame-Options', 'DENY'); res.setHeader('Referrer-Policy', 'no-referrer'); res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');

@@ -4,15 +4,32 @@ const path = require('path');
 const crypto = require('crypto');
 const storage = require('./storage');
 
-const PORT = Number(process.env.PORT || 8798);
 const ROOT = __dirname;
+function loadLocalEnv() {
+  if (process.env.NODE_ENV === 'production') return;
+  const envFile = path.join(ROOT, '.env');
+  if (!fs.existsSync(envFile)) return;
+  for (const rawLine of fs.readFileSync(envFile, 'utf8').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const separator = line.indexOf('=');
+    if (separator < 1) continue;
+    const key = line.slice(0, separator).trim();
+    let value = line.slice(separator + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    if (!(key in process.env)) process.env[key] = value;
+  }
+}
+loadLocalEnv();
+
+const PORT = Number(process.env.PORT || 8798);
 const STORE_FILE = path.join(ROOT, 'data', 'store.json');
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const loginAttempts = new Map();
 const serverStartedAt = new Date();
 const FREE_CUSTOMERS_PER_COMPANY = 30;
 const systemAdminId = String(process.env.SYSTEM_ADMIN_ID || 'admin').toLowerCase();
-const systemAdminPassword = process.env.SYSTEM_ADMIN_PASSWORD || (IS_PRODUCTION ? process.env.ADMIN_PASSWORD : 'password');
+const systemAdminPassword = process.env.SYSTEM_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || (IS_PRODUCTION ? '' : 'password');
 
 const seed = {
   tenants: [

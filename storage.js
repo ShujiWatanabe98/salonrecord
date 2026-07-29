@@ -80,6 +80,10 @@ async function verifyPassword(user, password) {
   return bcrypt.compare(String(password || ''), user.passwordHash);
 }
 
+async function hashPassword(password) {
+  return bcrypt.hash(String(password), 12);
+}
+
 async function createSession(userId) {
   const token = crypto.randomBytes(32).toString('base64url');
   const expiresAt = new Date(Date.now() + TOKEN_TTL_DAYS * 86400000);
@@ -113,4 +117,4 @@ async function health() {
   return { storage: 'postgres' };
 }
 
-module.exports = { initStorage, saveData, verifyPassword, createSession, findSession, deleteSession, health };
+module.exports = { initStorage, saveData, verifyPassword, hashPassword, createSession, findSession, deleteSession, health };

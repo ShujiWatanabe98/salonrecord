@@ -1,4 +1,5 @@
 data/store.json
+data/*.json
 .env
 .env.*
 !.env.example

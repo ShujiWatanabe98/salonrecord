@@ -9,6 +9,10 @@ const ROOT = __dirname;
 const STORE_FILE = path.join(ROOT, 'data', 'store.json');
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const loginAttempts = new Map();
+const serverStartedAt = new Date();
+const FREE_CUSTOMERS_PER_COMPANY = 30;
+const systemAdminId = String(process.env.SYSTEM_ADMIN_ID || 'admin').toLowerCase();
+const systemAdminPassword = process.env.SYSTEM_ADMIN_PASSWORD || (IS_PRODUCTION ? process.env.ADMIN_PASSWORD : 'password');
 
 const seed = {
   tenants: [
@@ -82,23 +86,196 @@ async function api(req, res, pathname) {
   if (req.method === 'POST' && pathname === '/api/login') {
     const ip = req.socket.remoteAddress || 'unknown';
     if (!loginAllowed(ip)) return json(res, 429, { error: 'ログイン試行回数が多すぎます。15分後にお試しください' });
-    const b = await body(req); const email = String(b.email || '').toLowerCase();
-    const candidates = db.users.filter(x => x.email.toLowerCase() === email && (!b.tenantId || x.tenantId === b.tenantId));
-    const verified = (await Promise.all(candidates.map(async user => ({ user, valid: await storage.verifyPassword(user, b.password) })))).filter(x => x.valid).map(x => x.user);
-    if (!verified.length) { recordLoginFailure(ip); return json(res, 401, { error: 'メールアドレスまたはパスワードが違います' }); }
+    const b = await body(req); const userId = String(b.userId || '').toLowerCase();
+    let verified;
+    if (systemAdminPassword && userId === systemAdminId && b.password === systemAdminPassword) {
+      verified = [db.users.find(user => user.role === 'system_admin')].filter(Boolean);
+    } else {
+      const candidates = db.users.filter(x => x.email.toLowerCase() === userId && (!b.tenantId || x.tenantId === b.tenantId));
+      verified = (await Promise.all(candidates.map(async user => ({ user, valid: await storage.verifyPassword(user, b.password) })))).filter(x => x.valid).map(x => x.user);
+    }
+    if (!verified.length) { recordLoginFailure(ip); return json(res, 401, { error: 'ユーザーIDまたはパスワードが違います' }); }
     if (!b.tenantId && verified.length > 1) return json(res, 409, { error: 'ログインする店舗を選択してください', code: 'TENANT_SELECTION_REQUIRED', tenants: verified.map(user => ({ id: user.tenantId, name: db.tenants.find(t => t.id === user.tenantId)?.name || user.tenantId })) });
     const user = verified[0];
+    const loginTenant = db.tenants.find(row => row.id === user.tenantId);
+    if (user.role !== 'system_admin' && loginTenant?.serviceStatus === 'suspended') return json(res, 423, { error: '未払いのため、この店舗のサービスは一時停止されています。管理者へお問い合わせください' });
     loginAttempts.delete(ip); const token = await storage.createSession(user.id); return json(res, 200, { token, user: safeUser(user) });
   }
   if (req.method === 'POST' && pathname === '/api/logout') { await storage.deleteSession(tokenOf(req)); return json(res, 204, {}); }
   const user = await auth(req); if (!user) return json(res, 401, { error: 'ログインが必要です' });
+  const userTenant = db.tenants.find(row => row.id === user.tenantId);
+  if (user.role !== 'system_admin' && userTenant?.serviceStatus === 'suspended') return json(res, 423, { error: '未払いのため、この店舗のサービスは一時停止されています。管理者へお問い合わせください' });
   if (pathname === '/api/me') return json(res, 200, safeUser(user));
+  if (pathname === '/api/admin/operations' && req.method === 'GET') {
+    if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
+    const storageHealth = await storage.health();
+    const tenantUsage = db.tenants.map(tenant => ({
+      id: tenant.id, name: tenant.name, companyName: tenant.companyName || '', serviceStatus: tenant.serviceStatus || 'active',
+      users: db.users.filter(row => row.tenantId === tenant.id && row.role !== 'system_admin').length,
+      customers: db.customers.filter(row => row.tenantId === tenant.id).length,
+      records: db.records.filter(row => row.tenantId === tenant.id).length,
+      templates: db.templates.filter(row => row.tenantId === tenant.id).length,
+      accounts: db.users.filter(row => row.tenantId === tenant.id && row.role !== 'system_admin').map(row => row.email),
+      accountDetails: db.users.filter(row => row.tenantId === tenant.id && row.role !== 'system_admin').map(row => ({ id: row.id, accountId: row.email, name: row.name, role: row.role }))
+    }));
+    return json(res, 200, {
+      status: 'operational', checkedAt: new Date().toISOString(),
+      serverStartedAt: serverStartedAt.toISOString(), uptimeSeconds: Math.floor(process.uptime()),
+      environment: IS_PRODUCTION ? 'production' : 'local', nodeVersion: process.version,
+      storage: storageHealth.storage, ocrConfigured: Boolean(process.env.OPENAI_API_KEY),
+      counts: {
+        tenants: db.tenants.length,
+        users: db.users.filter(row => row.role !== 'system_admin').length,
+        customers: db.customers.length, records: db.records.length, templates: db.templates.length
+      },
+      tenantUsage
+    });
+  }
+  if (pathname === '/api/admin/tenants' && req.method === 'POST') {
+    if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
+    const b = await body(req);
+    const companyName = String(b.companyName || '').trim();
+    const name = String(b.name || '').trim();
+    const accountId = String(b.accountId || '').trim().toLowerCase();
+    const password = String(b.password || '');
+    if (!companyName || !name || !accountId || !password) return json(res, 400, { error: '契約会社名、店舗名、アカウント、パスワードを入力してください' });
+    if (!/^[a-z0-9._-]{3,40}$/i.test(accountId)) return json(res, 400, { error: 'アカウントは3〜40文字の英数字・記号（._-）で入力してください' });
+    if (password.length < 8) return json(res, 400, { error: 'パスワードは8文字以上で入力してください' });
+    if (db.users.some(row => row.email.toLowerCase() === accountId)) return json(res, 409, { error: 'このアカウントは既に使用されています' });
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const tenant = { id: `tenant-${suffix}`, companyName, name, plan: '契約中', serviceStatus: 'active' };
+    const account = {
+      id: `owner-${suffix}`, tenantId: tenant.id, name: String(b.managerName || '').trim() || '店舗管理者',
+      email: accountId, passwordHash: await storage.hashPassword(password), role: 'owner', createdBy: 'system_admin', protected: true
+    };
+    const baseTemplate = db.templates[0] || seed.templates[0];
+    db.tenants.push(tenant);
+    db.users.push(account);
+    db.templates.push({ ...structuredClone(baseTemplate), id: `template-${suffix}`, tenantId: tenant.id, name: '標準カルテ', updatedAt: new Date().toISOString().slice(0, 10) });
+    await save();
+    return json(res, 201, { tenant, account: { id: account.id, accountId: account.email, name: account.name } });
+  }
+  if (pathname === '/api/admin/companies' && req.method === 'PUT') {
+    if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
+    const b = await body(req);
+    const currentName = String(b.currentName || '').trim();
+    const newName = String(b.newName || '').trim();
+    if (!currentName || !newName) return json(res, 400, { error: '現在の会社名と新しい会社名を入力してください' });
+    const stores = db.tenants.filter(row => (row.companyName || '会社名未登録') === currentName);
+    if (!stores.length) return json(res, 404, { error: '契約会社が見つかりません' });
+    if (newName !== currentName && db.tenants.some(row => row.companyName === newName)) return json(res, 409, { error: '同じ会社名が既に登録されています' });
+    stores.forEach(row => { row.companyName = newName; });
+    await save();
+    return json(res, 200, { companyName: newName, storesUpdated: stores.length });
+  }
+  if (pathname === '/api/admin/companies/status' && req.method === 'PUT') {
+    if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
+    const b = await body(req);
+    const companyName = String(b.companyName || '').trim();
+    if (!companyName || !['active', 'suspended'].includes(b.status)) return json(res, 400, { error: '会社名またはサービス状態が不正です' });
+    const stores = db.tenants.filter(row => row.companyName === companyName);
+    if (!stores.length) return json(res, 404, { error: '契約会社が見つかりません' });
+    const changedAt = new Date().toISOString();
+    stores.forEach(tenant => {
+      tenant.serviceStatus = b.status;
+      tenant.suspendedAt = b.status === 'suspended' ? changedAt : null;
+      tenant.suspensionReason = b.status === 'suspended' ? 'payment_overdue' : null;
+    });
+    await save();
+    return json(res, 200, { companyName, serviceStatus: b.status, storesUpdated: stores.length, changedAt });
+  }
+  const adminTenantMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)$/);
+  if (adminTenantMatch && req.method === 'PUT') {
+    if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
+    const tenantId = decodeURIComponent(adminTenantMatch[1]);
+    const tenant = db.tenants.find(row => row.id === tenantId);
+    const account = db.users.find(row => row.tenantId === tenantId && row.role === 'owner');
+    if (!tenant || !account) return json(res, 404, { error: '登録情報が見つかりません' });
+    const b = await body(req);
+    const companyName = String(b.companyName || '').trim();
+    const storeName = String(b.storeName || '').trim();
+    const managerName = String(b.managerName || '').trim();
+    const accountId = String(b.accountId || '').trim().toLowerCase();
+    const password = String(b.password || '');
+    if (!companyName || !storeName || !managerName || !accountId) return json(res, 400, { error: '会社名、店舗名、管理者名、アカウントを入力してください' });
+    if (!/^[a-z0-9._-]{3,40}$/i.test(accountId)) return json(res, 400, { error: 'アカウントは3〜40文字の英数字・記号（._-）で入力してください' });
+    if (db.users.some(row => row.id !== account.id && row.email.toLowerCase() === accountId)) return json(res, 409, { error: 'このアカウントは既に使用されています' });
+    if (password && password.length < 8) return json(res, 400, { error: '新しいパスワードは8文字以上で入力してください' });
+    tenant.companyName = companyName;
+    tenant.name = storeName;
+    account.name = managerName;
+    account.email = accountId;
+    if (password) account.passwordHash = await storage.hashPassword(password);
+    await save();
+    return json(res, 200, { tenant, account: { id: account.id, name: account.name, accountId: account.email }, passwordChanged: Boolean(password) });
+  }
+  if (adminTenantMatch && req.method === 'DELETE') {
+    if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
+    const tenantId = decodeURIComponent(adminTenantMatch[1]);
+    const tenant = db.tenants.find(row => row.id === tenantId);
+    if (!tenant) return json(res, 404, { error: '契約店舗が見つかりません' });
+    const removed = {
+      users: db.users.filter(row => row.tenantId === tenantId && row.role !== 'system_admin').length,
+      customers: db.customers.filter(row => row.tenantId === tenantId).length,
+      records: db.records.filter(row => row.tenantId === tenantId).length,
+      templates: db.templates.filter(row => row.tenantId === tenantId).length
+    };
+    db.tenants = db.tenants.filter(row => row.id !== tenantId);
+    db.users = db.users.filter(row => row.tenantId !== tenantId || row.role === 'system_admin');
+    db.customers = db.customers.filter(row => row.tenantId !== tenantId);
+    db.records = db.records.filter(row => row.tenantId !== tenantId);
+    db.templates = db.templates.filter(row => row.tenantId !== tenantId);
+    await save();
+    return json(res, 200, { deleted: { id: tenant.id, name: tenant.name, ...removed } });
+  }
   if (pathname === '/api/dashboard') {
     const customers = tenantRows('customers', user), records = tenantRows('records', user);
     return json(res, 200, { customers: customers.length, recordsThisMonth: records.filter(r => r.visitDate.startsWith(new Date().toISOString().slice(0, 7))).length, alerts: customers.filter(c => c.alerts.length).length, recent: [...records].sort((a,b) => b.visitDate.localeCompare(a.visitDate)).slice(0, 5).map(r => ({ ...r, customer: customers.find(c => c.id === r.customerId) })) });
   }
+  if (pathname === '/api/accounts' && req.method === 'GET') {
+    if (user.role !== 'owner') return json(res, 403, { error: '店舗管理者権限が必要です' });
+    return json(res, 200, db.users.filter(row => row.tenantId === user.tenantId && row.role !== 'system_admin').map(row => ({
+      id: row.id, name: row.name, accountId: row.email, role: row.role,
+      protected: row.protected === true || row.createdBy === 'system_admin' || row.role === 'owner'
+    })));
+  }
+  if (pathname === '/api/accounts' && req.method === 'POST') {
+    if (user.role !== 'owner') return json(res, 403, { error: '店舗管理者権限が必要です' });
+    const b = await body(req);
+    const name = String(b.name || '').trim();
+    const accountId = String(b.accountId || '').trim().toLowerCase();
+    const password = String(b.password || '');
+    if (!name || !accountId || !password) return json(res, 400, { error: '施術者名、アカウント名、初期パスワードを入力してください' });
+    if (!/^[a-z0-9._-]{3,40}$/i.test(accountId)) return json(res, 400, { error: 'アカウントは3〜40文字の英数字・記号（._-）で入力してください' });
+    if (password.length < 8) return json(res, 400, { error: '初期パスワードは8文字以上で入力してください' });
+    if (db.users.some(row => row.email.toLowerCase() === accountId)) return json(res, 409, { error: 'このアカウントは既に使用されています' });
+    const account = { id: id('staff-'), tenantId: user.tenantId, name, email: accountId, passwordHash: await storage.hashPassword(password), role: 'staff', createdBy: user.id, protected: false };
+    db.users.push(account);
+    await save();
+    return json(res, 201, { id: account.id, name: account.name, accountId: account.email, role: account.role, protected: false });
+  }
+  const accountMatch = pathname.match(/^\/api\/accounts\/([^/]+)$/);
+  if (accountMatch && req.method === 'DELETE') {
+    if (user.role !== 'owner') return json(res, 403, { error: '店舗管理者権限が必要です' });
+    const target = db.users.find(row => row.id === accountMatch[1] && row.tenantId === user.tenantId);
+    if (!target) return json(res, 404, { error: 'アカウントが見つかりません' });
+    if (target.protected === true || target.createdBy === 'system_admin' || target.role === 'owner') return json(res, 403, { error: 'システム管理者が作成した管理アカウントは削除できません' });
+    db.users = db.users.filter(row => row.id !== target.id);
+    await save();
+    return json(res, 200, { deleted: { id: target.id, name: target.name, accountId: target.email } });
+  }
   if (pathname === '/api/customers' && req.method === 'GET') return json(res, 200, tenantRows('customers', user));
-  if (pathname === '/api/customers' && req.method === 'POST') { const b = await body(req); const row = { id: id('c'), tenantId: user.tenantId, name: b.name, kana: b.kana || '', phone: b.phone || '', lastVisit: '', alerts: b.alerts || [], preferences: b.preferences || [] }; db.customers.push(row); await save(); return json(res, 201, row); }
+  if (pathname === '/api/customers' && req.method === 'POST') {
+    const b = await body(req);
+    const tenant = db.tenants.find(row => row.id === user.tenantId);
+    const companyTenantIds = db.tenants.filter(row => tenant?.companyName ? row.companyName === tenant.companyName : row.id === user.tenantId).map(row => row.id);
+    const currentCompanyCustomers = db.customers.filter(row => companyTenantIds.includes(row.tenantId)).length;
+    const billingTier = currentCompanyCustomers >= FREE_CUSTOMERS_PER_COMPANY ? 'paid' : 'free';
+    const row = { id: id('c'), tenantId: user.tenantId, name: b.name, kana: b.kana || '', phone: b.phone || '', lastVisit: '', alerts: b.alerts || [], preferences: b.preferences || [], billingTier };
+    db.customers.push(row);
+    await save();
+    return json(res, 201, { ...row, billing: { tier: billingTier, companyCustomers: currentCompanyCustomers + 1, freeLimit: FREE_CUSTOMERS_PER_COMPANY, paidCustomers: Math.max(0, currentCompanyCustomers + 1 - FREE_CUSTOMERS_PER_COMPANY) } });
+  }
   const cm = pathname.match(/^\/api\/customers\/([^/]+)$/);
   if (cm && req.method === 'GET') { const customer = tenantRows('customers', user).find(x => x.id === cm[1]); if (!customer) return json(res, 404, { error: '顧客が見つかりません' }); return json(res, 200, { customer, records: tenantRows('records', user).filter(r => r.customerId === customer.id).sort((a,b) => b.visitDate.localeCompare(a.visitDate)) }); }
   if (pathname === '/api/templates' && req.method === 'GET') return json(res, 200, tenantRows('templates', user));
@@ -143,6 +320,10 @@ async function start() {
   }
   const initialized = await storage.initStorage(ROOT, initial);
   db = initialized.data; storageMode = initialized.mode;
+  if (systemAdminPassword && !db.users.some(user => user.role === 'system_admin')) {
+    db.users.push({ id: 'system-admin', tenantId: null, name: 'システム管理者', email: systemAdminId, role: 'system_admin', protected: true });
+    await save();
+  }
   await provisionStoresFromEnvironment();
   server.listen(PORT, '0.0.0.0', () => console.log(`SalonRecord started on port ${PORT} (${storageMode})`));
 }

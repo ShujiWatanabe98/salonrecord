@@ -332,6 +332,20 @@ async function api(req, res, pathname) {
   }
   const adminTenantMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)$/);
   const adminTenantCustomerMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)\/customers$/);
+  const adminTenantGenderBackfillMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)\/backfill-gender$/);
+  if (adminTenantGenderBackfillMatch && req.method === 'POST') {
+    if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
+    const tenantId = decodeURIComponent(adminTenantGenderBackfillMatch[1]);
+    if (!db.tenants.some(row => row.id === tenantId)) return json(res, 404, { error: '店舗が見つかりません' });
+    const b = await body(req), gender = String(b.gender || '');
+    if (!['male', 'female'].includes(gender)) return json(res, 400, { error: '性別区分が不正です' });
+    const customers = db.customers.filter(row => row.tenantId === tenantId && !['male', 'female'].includes(row.gender));
+    customers.forEach(row => { row.gender = gender; });
+    const customerIds = new Set(db.customers.filter(row => row.tenantId === tenantId && row.gender === gender).map(row => row.id));
+    const records = db.records.filter(row => row.tenantId === tenantId && customerIds.has(row.customerId) && !['male', 'female', 'common'].includes(row.chartGender));
+    records.forEach(row => { row.chartGender = gender; });
+    await save(); return json(res, 200, { gender, customersUpdated: customers.length, recordsUpdated: records.length });
+  }
   if (adminTenantCustomerMatch && req.method === 'POST') {
     if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
     const tenantId = decodeURIComponent(adminTenantCustomerMatch[1]);

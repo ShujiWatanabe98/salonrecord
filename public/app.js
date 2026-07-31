@@ -36,12 +36,16 @@ function esc(v=''){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt
 function fmt(d){if(!d)return '—';const x=new Date(d+'T00:00:00');return `${x.getFullYear()}年${x.getMonth()+1}月${x.getDate()}日`}
 function normalizeChartGender(value){return value==='男性用'?'male':value==='女性用'?'female':value==='男女共通'?'common':['male','female','common'].includes(value)?value:''}
 function genderLabel(value){return value==='male'?'男性用':value==='female'?'女性用':value==='common'?'男女共通':'未設定'}
-function customerTopicPoints(records=[]){
-  const preferredKeys=['hobby','hobbies','interest','interests','lifestyle','occupation','preference','preferences','otherNotes'];
-  const ignored=/^(特になし|なし|未登録|初回|施術記録|OCRから保存)$/;
+function customerTopicPoints(records=[],preferences=[]){
+  const topicWords=['ヨガ','ランニング','ウォーキング','ゴルフ','ジム','筋トレ','ダンス','スポーツ','サウナ','温泉','旅行','キャンプ','アウトドア','音楽','映画','読書','カフェ','料理','美容','コスメ','ネイル','ファッション','ペット','犬','猫','ガーデニング','立ち仕事','デスクワーク'];
+  const relevantKeys=['hobby','hobbies','interest','interests','lifestyle','occupation','preference','preferences','otherNotes'];
+  const source=records.flatMap(record=>relevantKeys.map(key=>record.values?.[key]).filter(Boolean)).join(' ');
   const points=[];
-  [...records].reverse().forEach(record=>preferredKeys.forEach(key=>{const value=record.values?.[key];if(!value)return;String(value).split(/[。、,／/\n：:（）()]/).map(item=>item.trim()).filter(item=>item.length>=2&&item.length<=36&&!ignored.test(item)&&!/^〒|@|\d{2,4}-\d/.test(item)).forEach(item=>{if(!points.includes(item))points.push(item)})}));
-  return points.slice(0,8);
+  const occupation=records.map(record=>String(record.values?.occupation||'').trim()).find(Boolean);
+  if(occupation)points.push(`職業：${occupation.replace(/[。]/g,'').slice(0,18)}`);
+  topicWords.forEach(word=>{if(source.includes(word)&&!points.includes(word))points.push(word)});
+  preferences.map(value=>String(value).trim()).filter(value=>value.length>=2&&value.length<=18).forEach(value=>{if(!points.includes(value))points.push(value)});
+  return points.slice(0,6);
 }
 function todayDateValue(){const date=new Date();return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`}
 function optimizeImageSource(source,{maxDimension=2000,quality=.82}={}){
@@ -498,7 +502,7 @@ async function openCustomer(id){
     ['性別',c.gender==='male'?'男性':c.gender==='female'?'女性':'未設定'],['フリガナ',first.kana||c.kana],['お客様No.',first.customerNo],['メール',first.email],
     ['電話番号',first.phone||c.phone],['住所',first.address],['生年月日',first.birthDate],['職業',first.occupation]
   ];
-  const topicPoints=customerTopicPoints(d.records);
+  const topicPoints=customerTopicPoints(d.records,c.preferences);
   $('#pageTitle').textContent='お客様カルテ';$('#pageSub').textContent='施術前に注意事項を確認してください';
   $('#content').innerHTML=`<button type="button" class="ghost" id="backToCustomers">← 一覧に戻る</button><div class="detail-grid" style="margin-top:18px"><section class="card profile"><div class="avatar">${esc(c.name[0])}</div><h2>${esc(c.name)}</h2><p class="muted">${esc(c.kana)}<br>${esc(c.phone)}</p><div class="customer-gender-control"><label>カルテ運用区分<select id="customerGender" ${d.canEdit?'':'disabled'}><option value="" ${!c.gender?'selected':''}>未設定</option><option value="male" ${c.gender==='male'?'selected':''}>男性用</option><option value="female" ${c.gender==='female'?'selected':''}>女性用</option></select></label></div><div class="alert-box"><b>⚠ 施術前注意事項</b>${c.alerts.length?`<ul>${c.alerts.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:'<p>登録なし</p>'}</div><h3>お好み・ご希望</h3><ul>${c.preferences.map(x=>`<li>${esc(x)}</li>`).join('')||'<li>登録なし</li>'}</ul><p class="muted last-visit">最終来店：${fmt(c.lastVisit)}</p><section class="customer-basic-info"><div class="customer-basic-info-heading"><h3>初回登録情報</h3>${d.canEdit?'<button type="button" class="ghost" id="editBasicInfo">編集</button>':''}</div><div id="basicInfoView">${basicInfo.map(([label,value])=>`<div><small>${esc(label)}</small><span>${esc(value||'未登録')}</span></div>`).join('')}</div><form id="basicInfoForm" class="customer-basic-info-form hidden"><label>お名前<input name="name" required value="${esc(c.name)}"></label><label>フリガナ<input name="kana" value="${esc(first.kana||c.kana||'')}"></label><label>お客様No.<input name="customerNo" value="${esc(first.customerNo||'')}"></label><label>メール<input name="email" type="email" value="${esc(first.email||'')}"></label><label>電話番号<input name="phone" value="${esc(first.phone||c.phone||'')}"></label><label>住所<input name="address" value="${esc(first.address||'')}"></label><label>生年月日<input name="birthDate" value="${esc(first.birthDate||'')}"></label><label>職業<input name="occupation" value="${esc(first.occupation||'')}"></label><div class="customer-basic-info-actions"><button type="button" class="ghost" id="cancelBasicInfo">キャンセル</button><button type="submit" class="primary">保存</button></div><p class="error" id="basicInfoError"></p></form></section></section><section><div class="section-head"><h2>施術タイムライン</h2></div><div class="timeline">${d.records.map(r=>`<article class="card"><div class="field-head"><b>${fmt(r.visitDate)}</b><span><span class="badge gender-badge ${esc(r.chartGender||'unset')}">${esc(genderLabel(r.chartGender))}</span> <span class="badge">${esc(r.staff)}</span></span></div>${r.alerts.length?`<div class="alert-box"><b>注意</b> ${r.alerts.map(esc).join(' ／ ')}</div>`:''}<h3>${esc(r.values.treatment||'施術記録')}</h3><p>${esc(r.note||r.values.concern||'')}</p><small class="muted">${Object.entries(r.values).filter(([k])=>!['treatment','concern'].includes(k)).map(([,v])=>v).filter(Boolean).map(esc).join(' ・ ')}</small></article>`).join('')||'<div class="empty">施術履歴はありません</div>'}</div></section></div>`;
   const profileContact=$('.profile > p.muted');

@@ -35,6 +35,10 @@ function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('sh
 function esc(v=''){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function fmt(d){if(!d)return '—';const x=new Date(d+'T00:00:00');return `${x.getFullYear()}年${x.getMonth()+1}月${x.getDate()}日`}
 function todayDateValue(){const date=new Date();return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`}
+function optimizeImageSource(source,{maxDimension=2000,quality=.82}={}){
+  return new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>{const scale=Math.min(1,maxDimension/Math.max(image.naturalWidth,image.naturalHeight));const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));canvas.getContext('2d',{alpha:false}).drawImage(image,0,0,canvas.width,canvas.height);resolve(canvas.toDataURL('image/jpeg',quality))};image.onerror=()=>reject(new Error('画像を最適化できませんでした'));image.src=source});
+}
+function optimizeImageFile(file,options){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>optimizeImageSource(reader.result,options).then(resolve,reject);reader.onerror=()=>reject(new Error('画像を読み込めませんでした'));reader.readAsDataURL(file)})}
 function openRecordImage(source,alt='保存したカルテ画像'){
   document.querySelector('.record-image-dialog')?.remove();
   const dialog=document.createElement('dialog');dialog.className='record-image-dialog';dialog.setAttribute('aria-label','カルテ画像の拡大表示');
@@ -77,7 +81,7 @@ function chooseCameraChartType(stage){
 }
 function cameraFilePicker(onImage){
   const picker=document.createElement('input');picker.type='file';picker.accept='image/*';picker.setAttribute('capture','environment');picker.className='hidden';document.body.append(picker);
-  picker.onchange=()=>{const file=picker.files[0];if(!file){picker.remove();return}const reader=new FileReader();reader.onload=()=>{onImage(reader.result);picker.remove()};reader.onerror=()=>{picker.remove();toast('カメラ画像を読み込めませんでした')};reader.readAsDataURL(file)};picker.click();
+  picker.onchange=async()=>{const file=picker.files[0];if(!file){picker.remove();return}try{onImage(await optimizeImageFile(file))}catch(error){toast(error.message)}finally{picker.remove()}};picker.click();
 }
 async function captureChartPhoto(type,stage){
   document.querySelector('.chart-camera-dialog')?.remove();
@@ -99,7 +103,7 @@ async function captureChartPhoto(type,stage){
   cancel.onclick=()=>dialog.close();dialog.onclose=()=>{stopCamera();dialog.remove()};updateGuide();dialog.showModal();
   try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});video.srcObject=stream;await video.play()}
   catch(error){dialog.close();toast('カメラを起動できないため、画像ファイル選択へ切り替えます');cameraFilePicker(image=>{state.treatmentType=type;state.workflowStage=stage;state.images=[image];state.image=image;state.scan=null;showOcrFormForSelectedButton()});return}
-  shutter.onclick=()=>{if(!video.videoWidth||!video.videoHeight){toast('カメラの準備中です');return}const canvas=document.createElement('canvas');canvas.width=video.videoWidth;canvas.height=video.videoHeight;canvas.getContext('2d').drawImage(video,0,0);captured.push(canvas.toDataURL('image/jpeg',.92));if(captured.length<requiredPages){updateGuide();shutter.textContent='2枚目を撮影';return}state.treatmentType=type;state.workflowStage=stage;state.images=captured;state.image=captured[0];state.scan=null;dialog.close();showOcrFormForSelectedButton()};
+  shutter.onclick=()=>{if(!video.videoWidth||!video.videoHeight){toast('カメラの準備中です');return}const scale=Math.min(1,2000/Math.max(video.videoWidth,video.videoHeight));const canvas=document.createElement('canvas');canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);canvas.getContext('2d',{alpha:false}).drawImage(video,0,0,canvas.width,canvas.height);captured.push(canvas.toDataURL('image/jpeg',.82));if(captured.length<requiredPages){updateGuide();shutter.textContent='2枚目を撮影';return}state.treatmentType=type;state.workflowStage=stage;state.images=captured;state.image=captured[0];state.scan=null;dialog.close();showOcrFormForSelectedButton()};
 }
 function capturePartPhoto(stage){cameraFilePicker(image=>{state.partImages[stage]=image;showPartPhotoPreview(stage,image)})}
 function imagesForRecord(stage=state.workflowStage){
@@ -150,7 +154,7 @@ function showMissingImagePrompt(){
   toast('画像が1枚不足しています。2枚目を追加してください');
   addButton.onclick=()=>{
     const picker=document.createElement('input');picker.type='file';picker.accept='image/png,image/jpeg,image/webp';picker.setAttribute('capture','environment');picker.className='hidden';document.body.append(picker);
-    picker.onchange=()=>{const file=picker.files[0];if(!file){picker.remove();return}const reader=new FileReader();reader.onload=()=>{state.images=[...state.images,reader.result].slice(0,2);state.image=state.images[0];picker.remove();showOcrFormForSelectedButton()};reader.onerror=()=>{picker.remove();toast('画像を読み込めませんでした')};reader.readAsDataURL(file)};
+    picker.onchange=async()=>{const file=picker.files[0];if(!file){picker.remove();return}try{state.images=[...state.images,await optimizeImageFile(file)].slice(0,2);state.image=state.images[0];showOcrFormForSelectedButton()}catch(error){toast(error.message)}finally{picker.remove()}};
     picker.click();
   };
 }
@@ -164,7 +168,7 @@ async function openTreatmentScan(label,stage='new'){
     const files=[...picker.files].slice(0,2);
     if(!files.length)return;
     if(picker.files.length>2)toast('画像は先頭の2枚を読み込みました');
-    state.images=await Promise.all(files.map(file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file)})));
+    state.images=await Promise.all(files.map(file=>optimizeImageFile(file)));
     state.image=state.images[0];state.scan=null;
     showOcrFormForSelectedButton();
   };

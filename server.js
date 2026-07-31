@@ -73,7 +73,7 @@ let db;
 let storageMode = 'starting';
 const save = () => storage.saveData(db);
 const json = (res, status, body) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
-const body = req => new Promise((resolve, reject) => { let s = ''; req.on('data', c => { s += c; if (s.length > 22_000_000) reject(new Error('ファイルが大きすぎます')); }); req.on('end', () => { try { resolve(s ? JSON.parse(s) : {}); } catch { reject(new Error('JSON形式が不正です')); } }); });
+const body = req => new Promise((resolve, reject) => { let s = '', stopped = false; req.on('data', c => { if (stopped) return; s += c; if (s.length > 14_000_000) { stopped = true; reject(Object.assign(new Error('画像容量が大きすぎます。画像を小さくして再度お試しください'), { status: 413 })); } }); req.on('end', () => { if (stopped) return; try { resolve(s ? JSON.parse(s) : {}); } catch { reject(new Error('JSON形式が不正です')); } }); });
 const tokenOf = req => (req.headers.authorization || '').replace(/^Bearer /, '');
 const auth = async req => { const userId = await storage.findSession(tokenOf(req)); return db.users.find(u => u.id === userId); };
 const tenantRows = (name, user) => db[name].filter(x => x.tenantId === user.tenantId);
@@ -448,7 +448,7 @@ async function api(req, res, pathname) {
       .sort((a, b) => String(b.visitDate || '').localeCompare(String(a.visitDate || '')));
     return json(res, 200, records);
   }
-  if (pathname === '/api/records' && req.method === 'POST') { const b = await body(req); const customer = tenantRows('customers', user).find(c => c.id === b.customerId); if (!customer) return json(res, 400, { error: '顧客を選択してください' }); const images = (Array.isArray(b.images) ? b.images : [b.image]).filter(image => /^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(String(image || ''))).slice(0, 3); const row = { id: id('r'), tenantId: user.tenantId, customerId: customer.id, visitDate: b.visitDate || new Date().toISOString().slice(0,10), staff: user.name, templateId: b.templateId, values: b.values || {}, alerts: b.alerts || [], note: b.note || '', images, createdAt: new Date().toISOString() }; db.records.push(row); customer.lastVisit = row.visitDate; customer.alerts = [...new Set([...(customer.alerts || []), ...row.alerts])]; await save(); return json(res, 201, row); }
+  if (pathname === '/api/records' && req.method === 'POST') { const b = await body(req); const customer = tenantRows('customers', user).find(c => c.id === b.customerId); if (!customer) return json(res, 400, { error: '顧客を選択してください' }); const images = (Array.isArray(b.images) ? b.images : [b.image]).filter(image => /^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(String(image || ''))).slice(0, 3); if (images.some(image => image.length > 4_000_000)) return json(res, 413, { error: '1枚あたりの画像容量が大きすぎます。撮影または選択し直してください' }); const row = { id: id('r'), tenantId: user.tenantId, customerId: customer.id, visitDate: b.visitDate || new Date().toISOString().slice(0,10), staff: user.name, templateId: b.templateId, values: b.values || {}, alerts: b.alerts || [], note: b.note || '', images, createdAt: new Date().toISOString() }; db.records.push(row); customer.lastVisit = row.visitDate; customer.alerts = [...new Set([...(customer.alerts || []), ...row.alerts])]; await save(); return json(res, 201, row); }
   return json(res, 404, { error: 'APIが見つかりません' });
 }
 

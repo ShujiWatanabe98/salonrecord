@@ -85,6 +85,21 @@ function recordLoginFailure(ip) { loginAttempts.set(ip, [...(loginAttempts.get(i
 function outputText(result) { return result.output_text || (result.output || []).flatMap(x => x.content || []).find(x => x.type === 'output_text')?.text || ''; }
 function parseModelJson(text) { const cleaned = text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim(); return JSON.parse(cleaned); }
 
+async function validateOcrSheets(images, expectedType, workflowStage) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw Object.assign(new Error('OPENAI_API_KEY が設定されていません。'), { status: 503 });
+  images = (Array.isArray(images) ? images : [images]).filter(Boolean).slice(0, 2);
+  if (!images.length || images.some(image => !/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(image))) throw Object.assign(new Error('確認する画像を選択してください。'), { status: 400 });
+  if (!['フット', 'フェイシャル', 'ボディ'].includes(expectedType) || !['new', 'progress'].includes(workflowStage)) throw Object.assign(new Error('確認するシート種別が不正です。'), { status: 400 });
+  const expectedStage = workflowStage === 'progress' ? '途中経過' : '新規登録';
+  const prompt = `サロンカルテ画像の種類だけを判定してください。期待値は「${expectedType}」の「${expectedStage}」シートです。\n新規登録シートは通常2ページ構成、途中経過シートは通常1ページ構成です。画像内のタイトル、Foot/Facial/Body、人体図・足図・顔図、初診・途中経過のレイアウトを確認してください。文字のOCR結果は不要です。\nJSON以外は出力しません。\n出力形式: {"valid":trueまたはfalse,"detectedType":"フット|フェイシャル|ボディ|不明","detectedStage":"新規登録|途中経過|不明","pages":["各画像で判定したページや特徴"],"warnings":["不一致理由。問題なければ空配列"]}`;
+  const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5.6', store: false, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, ...images.map(image => ({ type: 'input_image', image_url: image, detail: 'low' }))] }] }) });
+  const raw = await response.text();let result;try { result = JSON.parse(raw); } catch { result = null; }
+  if (!response.ok) throw Object.assign(new Error(result?.error?.message || `シート確認に失敗しました（HTTP ${response.status}）`), { status: response.status });
+  if (!result) throw Object.assign(new Error('AIから不正な応答を受信しました'), { status: 502 });
+  return parseModelJson(outputText(result));
+}
+
 async function runOcr(image, template) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw Object.assign(new Error('OPENAI_API_KEY が設定されていません。デモ読取をご利用ください。'), { status: 503 });
@@ -385,6 +400,15 @@ async function api(req, res, pathname) {
   }
   const cm = pathname.match(/^\/api\/customers\/([^/]+)$/);
   if (cm && req.method === 'GET') { const customer = tenantRows('customers', user).find(x => x.id === cm[1]); if (!customer) return json(res, 404, { error: '顧客が見つかりません' }); return json(res, 200, { customer, records: tenantRows('records', user).filter(r => r.customerId === customer.id).sort((a,b) => b.visitDate.localeCompare(a.visitDate)) }); }
+  if (cm && req.method === 'PUT') {
+    const customer = tenantRows('customers', user).find(x => x.id === cm[1]);
+    if (!customer) return json(res, 404, { error: 'お客様が見つかりません' });
+    const b = await body(req);
+    if (!Array.isArray(b.alerts)) return json(res, 400, { error: '注意事項を正しく入力してください' });
+    customer.alerts = [...new Set(b.alerts.map(value => String(value).trim()).filter(Boolean))].slice(0, 50);
+    await save();
+    return json(res, 200, customer);
+  }
   if (pathname === '/api/templates' && req.method === 'GET') return json(res, 200, tenantRows('templates', user));
   if (pathname === '/api/templates' && req.method === 'POST') { if (user.role !== 'owner') return json(res, 403, { error: 'オーナー権限が必要です' }); const b = await body(req); const row = { id: id('tpl'), tenantId: user.tenantId, name: b.name || '新しいカルテ', active: true, updatedAt: new Date().toISOString().slice(0,10), fields: b.fields || [] }; db.templates.push(row); await save(); return json(res, 201, row); }
   const tm = pathname.match(/^\/api\/templates\/([^/]+)$/);
@@ -395,9 +419,17 @@ async function api(req, res, pathname) {
   if (pathname === '/api/ocr/facial-progress' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runProgressFacialOcr(b.image)); }
   if (pathname === '/api/ocr/foot-progress' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runProgressFootOcr(b.image)); }
   if (pathname === '/api/ocr/body-progress' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runProgressBodyOcr(b.image)); }
+  if (pathname === '/api/ocr/validate-sheet' && req.method === 'POST') { const b = await body(req); return json(res, 200, await validateOcrSheets(b.images, b.expectedType, b.workflowStage)); }
   if (pathname === '/api/ocr' && req.method === 'POST') { const b = await body(req); const template = tenantRows('templates', user).find(x => x.id === b.templateId); if (!template) return json(res, 404, { error: 'テンプレートが見つかりません' }); return json(res, 200, await runOcr(b.image, template)); }
   if (pathname === '/api/ocr/demo' && req.method === 'POST') return json(res, 200, { customerName: '山田 花子', visitDate: new Date().toISOString().slice(0,10), values: { name: '山田 花子', visitDate: new Date().toISOString().slice(0,10), concern: '頬の乾燥、夕方のくすみが気になる', allergy: 'ラテックスアレルギーあり', redness: 'アルコール配合化粧水で赤みが出やすい', treatment: '保湿フェイシャル 60分', preference: '香りのない製品、マッサージは弱め希望' }, confidence: { name: .98, visitDate: .96, concern: .87, allergy: .93, redness: .84, treatment: .91, preference: .86 }, alerts: ['ラテックスアレルギー', 'アルコール成分で赤みが出やすい'] });
-  if (pathname === '/api/records' && req.method === 'POST') { const b = await body(req); const customer = tenantRows('customers', user).find(c => c.id === b.customerId); if (!customer) return json(res, 400, { error: '顧客を選択してください' }); const row = { id: id('r'), tenantId: user.tenantId, customerId: customer.id, visitDate: b.visitDate || new Date().toISOString().slice(0,10), staff: user.name, templateId: b.templateId, values: b.values || {}, alerts: b.alerts || [], note: b.note || '', createdAt: new Date().toISOString() }; db.records.push(row); customer.lastVisit = row.visitDate; customer.alerts = [...new Set([...(customer.alerts || []), ...row.alerts])]; await save(); return json(res, 201, row); }
+  if (pathname === '/api/records' && req.method === 'GET') {
+    const customers = tenantRows('customers', user);
+    const records = tenantRows('records', user)
+      .map(record => ({ ...record, customer: customers.find(customer => customer.id === record.customerId) || null }))
+      .sort((a, b) => String(b.visitDate || '').localeCompare(String(a.visitDate || '')));
+    return json(res, 200, records);
+  }
+  if (pathname === '/api/records' && req.method === 'POST') { const b = await body(req); const customer = tenantRows('customers', user).find(c => c.id === b.customerId); if (!customer) return json(res, 400, { error: '顧客を選択してください' }); const images = (Array.isArray(b.images) ? b.images : [b.image]).filter(image => /^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(String(image || ''))).slice(0, 3); const row = { id: id('r'), tenantId: user.tenantId, customerId: customer.id, visitDate: b.visitDate || new Date().toISOString().slice(0,10), staff: user.name, templateId: b.templateId, values: b.values || {}, alerts: b.alerts || [], note: b.note || '', images, createdAt: new Date().toISOString() }; db.records.push(row); customer.lastVisit = row.visitDate; customer.alerts = [...new Set([...(customer.alerts || []), ...row.alerts])]; await save(); return json(res, 201, row); }
   return json(res, 404, { error: 'APIが見つかりません' });
 }
 

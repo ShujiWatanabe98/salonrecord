@@ -1,15 +1,23 @@
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-const state = { token: sessionStorage.getItem('salonToken'), user: null, customers: [], templates: [], scan: null, image: '', images: [], treatmentType: 'フット', workflowStage: 'new', selectedTemplate: null };
+const state = { token: sessionStorage.getItem('salonToken'), user: null, customers: [], templates: [], scan: null, image: '', images: [], partImages: { new: '', progress: '' }, treatmentType: 'フット', workflowStage: 'new', selectedTemplate: null, sheetValidationToken: 0 };
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function setAiWorking(working){
+  const icon=$('#aiStatus');if(!icon)return;
+  icon.classList.toggle('is-working',working);
+  icon.title=working?'AI作動中':'AI待機中';
+  icon.setAttribute('aria-label',icon.title);
+}
 async function api(url, options={}, attempt=0) {
   const method=(options.method||'GET').toUpperCase();
+  const tracksAi=method==='POST'&&url.startsWith('/api/ocr');
   let response;
+  if(tracksAi)setAiWorking(true);
   try {
     response=await fetch(url,{...options,headers:{'Content-Type':'application/json',Authorization:`Bearer ${state.token||''}`,...options.headers}});
   } catch (cause) {
     if(method==='GET'&&attempt<2){await wait(700*(attempt+1));return api(url,options,attempt+1)}
     const error=new Error('サーバーに接続できません。通信環境を確認して再度お試しください');error.cause=cause;throw error;
-  }
+  } finally {if(tracksAi)setAiWorking(false)}
   const raw=await response.text();
   let data=null;
   if(raw){try{data=JSON.parse(raw)}catch{data=null}}
@@ -26,6 +34,16 @@ async function api(url, options={}, attempt=0) {
 function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2500)}
 function esc(v=''){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function fmt(d){if(!d)return '—';const x=new Date(d+'T00:00:00');return `${x.getFullYear()}年${x.getMonth()+1}月${x.getDate()}日`}
+function todayDateValue(){const date=new Date();return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`}
+function openRecordImage(source,alt='保存したカルテ画像'){
+  document.querySelector('.record-image-dialog')?.remove();
+  const dialog=document.createElement('dialog');dialog.className='record-image-dialog';dialog.setAttribute('aria-label','カルテ画像の拡大表示');
+  const closeButton=document.createElement('button');closeButton.type='button';closeButton.className='record-image-close';closeButton.textContent='×';closeButton.setAttribute('aria-label','閉じる');
+  const image=document.createElement('img');image.src=source;image.alt=alt;
+  dialog.append(closeButton,image);document.body.append(dialog);
+  closeButton.onclick=()=>dialog.close();dialog.onclick=event=>{if(event.target===dialog)dialog.close()};dialog.onclose=()=>dialog.remove();
+  dialog.showModal();
+}
 
 $('#loginForm').addEventListener('submit',async e=>{e.preventDefault();$('#loginError').textContent='';try{const b=Object.fromEntries(new FormData(e.target));const r=await api('/api/login',{method:'POST',body:JSON.stringify(b)});state.token=r.token;sessionStorage.setItem('salonToken',r.token);await boot(r.user)}catch(x){if(x.data?.code==='TENANT_SELECTION_REQUIRED'){const select=$('#tenantSelect');select.innerHTML=x.data.tenants.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');select.required=true;$('#tenantField').classList.remove('hidden');$('#loginError').textContent='ログインする店舗を選択してください'}else $('#loginError').textContent=x.message}});
 $('#logout').onclick=async()=>{try{await api('/api/logout',{method:'POST'})}catch{}sessionStorage.removeItem('salonToken');location.reload()};
@@ -44,6 +62,98 @@ function createTreatmentActions(stage='new'){
   });
   return actions;
 }
+function createCameraActions(stage='new'){
+  const actions=document.createElement('div');actions.className='camera-actions';
+  const chartButton=document.createElement('button');chartButton.type='button';chartButton.className='ghost camera-chart-button';chartButton.textContent='カメラカルテ撮影';chartButton.onclick=()=>chooseCameraChartType(stage);
+  const partButton=document.createElement('button');partButton.type='button';partButton.className='ghost camera-part-button';partButton.textContent='カメラ部位撮影';partButton.onclick=()=>capturePartPhoto(stage);
+  actions.append(chartButton,partButton);return actions;
+}
+function chooseCameraChartType(stage){
+  document.querySelector('.camera-type-dialog')?.remove();
+  const dialog=document.createElement('dialog');dialog.className='camera-type-dialog';dialog.innerHTML='<h3>撮影するカルテの種類</h3><p>入力欄を表示する種類を選んでください。</p>';
+  const choices=document.createElement('div');choices.className='camera-type-choices';
+  ['フット','フェイシャル','ボディ'].forEach(type=>{const button=document.createElement('button');button.type='button';button.className='primary';button.textContent=type;button.onclick=()=>{dialog.close();captureChartPhoto(type,stage)};choices.append(button)});
+  const cancel=document.createElement('button');cancel.type='button';cancel.className='ghost';cancel.textContent='キャンセル';cancel.onclick=()=>dialog.close();dialog.append(choices,cancel);dialog.onclose=()=>dialog.remove();document.body.append(dialog);dialog.showModal();
+}
+function cameraFilePicker(onImage){
+  const picker=document.createElement('input');picker.type='file';picker.accept='image/*';picker.setAttribute('capture','environment');picker.className='hidden';document.body.append(picker);
+  picker.onchange=()=>{const file=picker.files[0];if(!file){picker.remove();return}const reader=new FileReader();reader.onload=()=>{onImage(reader.result);picker.remove()};reader.onerror=()=>{picker.remove();toast('カメラ画像を読み込めませんでした')};reader.readAsDataURL(file)};picker.click();
+}
+async function captureChartPhoto(type,stage){
+  document.querySelector('.chart-camera-dialog')?.remove();
+  const requiredPages=stage==='new'?2:1,captured=[];
+  const dialog=document.createElement('dialog');dialog.className='chart-camera-dialog';
+  const title=document.createElement('h3');title.textContent=`${type} カルテ撮影`;
+  const guide=document.createElement('p');guide.className='chart-camera-guide';
+  const progress=document.createElement('div');progress.className='chart-camera-progress';
+  const videoWrap=document.createElement('div');videoWrap.className='chart-camera-video-wrap';
+  const video=document.createElement('video');video.autoplay=true;video.playsInline=true;video.muted=true;
+  const a4Frame=document.createElement('div');a4Frame.className='a4-camera-frame';a4Frame.innerHTML='<span>A4用紙を枠内に合わせてください</span>';
+  videoWrap.append(video,a4Frame);
+  const actions=document.createElement('div');actions.className='chart-camera-actions';
+  const cancel=document.createElement('button');cancel.type='button';cancel.className='ghost';cancel.textContent='キャンセル';
+  const shutter=document.createElement('button');shutter.type='button';shutter.className='primary camera-shutter';shutter.textContent='撮影';
+  actions.append(cancel,shutter);dialog.append(title,guide,progress,videoWrap,actions);document.body.append(dialog);
+  const updateGuide=()=>{guide.textContent=requiredPages===2?`${captured.length+1}枚目／2枚：${captured.length===0?'カウンセリングシート1ページ目':'同意・図示の2ページ目'}を撮影してください`:'途中経過シートをA4枠内に合わせて撮影してください';progress.innerHTML=Array.from({length:requiredPages},(_,index)=>`<span class="${index<captured.length?'done':index===captured.length?'current':''}">${index+1}枚目</span>`).join('')};
+  let stream=null;const stopCamera=()=>{stream?.getTracks().forEach(track=>track.stop());stream=null};
+  cancel.onclick=()=>dialog.close();dialog.onclose=()=>{stopCamera();dialog.remove()};updateGuide();dialog.showModal();
+  try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});video.srcObject=stream;await video.play()}
+  catch(error){dialog.close();toast('カメラを起動できないため、画像ファイル選択へ切り替えます');cameraFilePicker(image=>{state.treatmentType=type;state.workflowStage=stage;state.images=[image];state.image=image;state.scan=null;showOcrFormForSelectedButton()});return}
+  shutter.onclick=()=>{if(!video.videoWidth||!video.videoHeight){toast('カメラの準備中です');return}const canvas=document.createElement('canvas');canvas.width=video.videoWidth;canvas.height=video.videoHeight;canvas.getContext('2d').drawImage(video,0,0);captured.push(canvas.toDataURL('image/jpeg',.92));if(captured.length<requiredPages){updateGuide();shutter.textContent='2枚目を撮影';return}state.treatmentType=type;state.workflowStage=stage;state.images=captured;state.image=captured[0];state.scan=null;dialog.close();showOcrFormForSelectedButton()};
+}
+function capturePartPhoto(stage){cameraFilePicker(image=>{state.partImages[stage]=image;showPartPhotoPreview(stage,image)})}
+function imagesForRecord(stage=state.workflowStage){
+  const chartImages=(state.images.length?state.images:[state.image]).filter(Boolean);
+  const partImage=state.partImages?.[stage];
+  return [...chartImages,...(partImage?[partImage]:[])].slice(0,3);
+}
+function showPartPhotoPreview(stage,image){
+  document.querySelector(`.part-photo-panel[data-stage="${stage}"]`)?.remove();
+  const anchor=stage==='progress'?$('.progress-frame'):$('.hero');if(!anchor)return;
+  const panel=document.createElement('section');panel.className='card part-photo-panel';panel.dataset.stage=stage;
+  const heading=document.createElement('div');heading.className='section-head';heading.innerHTML=`<h2>${stage==='progress'?'途中経過':'新規登録'}・施術部位写真</h2>`;
+  const close=document.createElement('button');close.type='button';close.className='ghost';close.textContent='削除';close.onclick=()=>{state.partImages[stage]='';panel.remove()};heading.append(close);
+  const photo=document.createElement('img');photo.src=image;photo.alt='カメラで撮影した施術部位';panel.append(heading,photo);anchor.insertAdjacentElement('afterend',panel);
+}
+function showOcrFormForSelectedButton(){
+  const formByButton={
+    new:{'フット':showSelectedImagePreview,'フェイシャル':showSelectedFacialImagePreview,'ボディ':showSelectedBodyImagePreview},
+    progress:{'フット':showProgressFootImagePreview,'フェイシャル':showProgressFacialImagePreview,'ボディ':showProgressBodyImagePreview}
+  };
+  const showForm=formByButton[state.workflowStage]?.[state.treatmentType];
+  if(showForm)showForm();
+  showMissingImagePrompt();
+  validateDisplayedSheets();
+}
+async function validateDisplayedSheets(){
+  const frame=$('.image-preview-frame'),images=(state.images.length?state.images:[state.image]).filter(Boolean).slice(0,2);if(!frame||!images.length)return;
+  const token=++state.sheetValidationToken;
+  frame.querySelector('.sheet-validation-status')?.remove();
+  const status=document.createElement('div');status.className='sheet-validation-status is-checking';status.textContent='AIがシート種類を確認しています…';
+  const prompt=frame.querySelector('.missing-image-prompt');if(prompt)prompt.insertAdjacentElement('afterend',status);else frame.insertBefore(status,frame.children[1]||null);
+  try{
+    const result=await api('/api/ocr/validate-sheet',{method:'POST',body:JSON.stringify({images,expectedType:state.treatmentType,workflowStage:state.workflowStage})});
+    if(token!==state.sheetValidationToken||!status.isConnected)return;
+    status.classList.remove('is-checking');
+    if(result.valid){status.classList.add('is-valid');status.textContent=`✓ ${state.treatmentType}の${state.workflowStage==='progress'?'途中経過':'新規登録'}シートを確認しました`}
+    else{status.classList.add('is-warning');const warnings=(result.warnings||[]).filter(Boolean).join('／');status.textContent=`⚠ シートが違う可能性があります。検出: ${result.detectedType||'不明'}・${result.detectedStage||'不明'}${warnings?`（${warnings}）`:''}`;toast('選択したボタンと画像のシート種類が一致しない可能性があります')}
+  }catch(error){if(token!==state.sheetValidationToken||!status.isConnected)return;status.classList.remove('is-checking');status.classList.add('is-warning');status.textContent=`⚠ シート種類を確認できませんでした: ${error.message}`}
+}
+function showMissingImagePrompt(){
+  document.querySelector('.missing-image-prompt')?.remove();
+  if(state.workflowStage!=='new'||state.images.length>=2)return;
+  const frame=$('.image-preview-frame');if(!frame)return;
+  const prompt=document.createElement('div');prompt.className='missing-image-prompt';
+  const message=document.createElement('span');message.textContent=`${state.treatmentType}カルテは2枚構成です。2枚目の画像ファイルを追加してください。`;
+  const addButton=document.createElement('button');addButton.type='button';addButton.className='primary';addButton.textContent='2枚目を追加';
+  prompt.append(message,addButton);frame.insertBefore(prompt,frame.children[1]||null);
+  toast('画像が1枚不足しています。2枚目を追加してください');
+  addButton.onclick=()=>{
+    const picker=document.createElement('input');picker.type='file';picker.accept='image/png,image/jpeg,image/webp';picker.setAttribute('capture','environment');picker.className='hidden';document.body.append(picker);
+    picker.onchange=()=>{const file=picker.files[0];if(!file){picker.remove();return}const reader=new FileReader();reader.onload=()=>{state.images=[...state.images,reader.result].slice(0,2);state.image=state.images[0];picker.remove();showOcrFormForSelectedButton()};reader.onerror=()=>{picker.remove();toast('画像を読み込めませんでした')};reader.readAsDataURL(file)};
+    picker.click();
+  };
+}
 async function openTreatmentScan(label,stage='new'){
   if(!['フット','フェイシャル','ボディ'].includes(label)){await show('scan');return}
   state.treatmentType=label;
@@ -56,7 +166,7 @@ async function openTreatmentScan(label,stage='new'){
     if(picker.files.length>2)toast('画像は先頭の2枚を読み込みました');
     state.images=await Promise.all(files.map(file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file)})));
     state.image=state.images[0];state.scan=null;
-    if(state.workflowStage==='progress'&&state.treatmentType==='フェイシャル')showProgressFacialImagePreview();else if(state.workflowStage==='progress'&&state.treatmentType==='フット')showProgressFootImagePreview();else if(state.workflowStage==='progress'&&state.treatmentType==='ボディ')showProgressBodyImagePreview();else if(state.treatmentType==='フェイシャル')showSelectedFacialImagePreview();else if(state.treatmentType==='ボディ')showSelectedBodyImagePreview();else showSelectedImagePreview();
+    showOcrFormForSelectedButton();
   };
   picker.click();
 }
@@ -175,8 +285,11 @@ async function saveOcrRecord(frame,button){
     if(!template)throw new Error('保存用テンプレートがありません');
     const treatmentLabel=state.workflowStage==='progress'?`${state.treatmentType} 途中経過`:state.treatmentType;
     values.treatment=treatmentLabel;
-    await api('/api/records',{method:'POST',body:JSON.stringify({customerId:customer.id,visitDate:new Date().toISOString().slice(0,10),templateId:template.id,values,alerts:[],note:`${treatmentLabel} OCRから保存`})});
-    button.textContent='保存済み';toast('OCR結果を保存しました');
+    const images=imagesForRecord();
+    const visitDate=todayDateValue();
+    await api('/api/records',{method:'POST',body:JSON.stringify({customerId:customer.id,visitDate,templateId:template.id,values,alerts:[],note:`${treatmentLabel} OCRから保存`,images})});
+    state.partImages[state.workflowStage]='';
+    button.textContent='保存済み';toast('カルテ画像・部位写真・OCR結果を保存しました');
   }catch(error){button.disabled=false;button.textContent='保存';toast(error.message)}
 }
 async function runSelectedFootOcr(){
@@ -187,6 +300,8 @@ async function runSelectedFootOcr(){
 }
 function enhanceCurrentView(name){
   if(name!=='dashboard')return;
+  const recentHeading=$$('.section-head h2').find(element=>element.textContent==='最近の施術記録');
+  if(recentHeading){recentHeading.textContent='お客様履歴';setupDashboardPatientSearch(recentHeading.closest('.section-head'))}
   const hero=$('.hero');
   const heading=$('.hero h2');
   if(heading)heading.textContent='新規登録';
@@ -195,13 +310,50 @@ function enhanceCurrentView(name){
   const readButton=$('.hero>.primary');
   if(readButton)readButton.replaceWith(createTreatmentActions('new'));
   if(hero){
+    hero.append(createCameraActions('new'));
     const progressFrame=document.createElement('section');
     progressFrame.className='hero progress-frame';
     progressFrame.innerHTML='<h2>途中経過</h2>';
     progressFrame.append(createTreatmentActions('progress'));
+    progressFrame.append(createCameraActions('progress'));
     hero.insertAdjacentElement('afterend',progressFrame);
-    if(state.image||state.images.length){if(state.workflowStage==='progress'&&state.treatmentType==='フェイシャル')showProgressFacialImagePreview();else if(state.workflowStage==='progress'&&state.treatmentType==='フット')showProgressFootImagePreview();else if(state.workflowStage==='progress'&&state.treatmentType==='ボディ')showProgressBodyImagePreview();else if(state.treatmentType==='フェイシャル')showSelectedFacialImagePreview();else if(state.treatmentType==='ボディ')showSelectedBodyImagePreview();else showSelectedImagePreview()}
+    if(state.image||state.images.length)showOcrFormForSelectedButton();
   }
+}
+async function setupDashboardPatientSearch(sectionHead){
+  if(!sectionHead)return;
+  sectionHead.classList.add('patient-search-head');
+  const resultCard=sectionHead.nextElementSibling;
+  if(!resultCard)return;
+  const oldAction=sectionHead.querySelector('button');
+  const searchFields=document.createElement('div');searchFields.className='patient-search-fields';
+  const input=document.createElement('input');
+  input.type='search';input.className='patient-search-input';input.placeholder='お客様名で検索';input.setAttribute('aria-label','お客様名で検索');
+  const phoneInput=document.createElement('input');
+  phoneInput.type='search';phoneInput.inputMode='tel';phoneInput.className='patient-search-input';phoneInput.placeholder='電話番号で検索';phoneInput.setAttribute('aria-label','電話番号で検索');
+  const freewordInput=document.createElement('input');
+  freewordInput.type='search';freewordInput.className='patient-search-input';freewordInput.placeholder='フリーワード検索';freewordInput.setAttribute('aria-label','フリーワード検索');
+  searchFields.append(input,phoneInput,freewordInput);
+  if(oldAction)oldAction.replaceWith(searchFields);else sectionHead.append(searchFields);
+  try{
+    const [customers,records]=await Promise.all([api('/api/customers'),api('/api/records')]);
+    const filterPatients=()=>{
+      const query=input.value.trim().toLowerCase();
+      const phoneQuery=phoneInput.value.replace(/\D/g,'');
+      const freewordQuery=freewordInput.value.trim().toLowerCase();
+      const matches=records.filter(record=>{
+        const customer=record.customer||customers.find(item=>item.id===record.customerId)||{};
+        const nameMatches=`${customer.name||''} ${customer.kana||''}`.toLowerCase().includes(query);
+        const phoneMatches=String(customer.phone||'').replace(/\D/g,'').includes(phoneQuery);
+        const freewordMatches=`${JSON.stringify(customer)} ${JSON.stringify(record)}`.toLowerCase().includes(freewordQuery);
+        return nameMatches&&phoneMatches&&freewordMatches;
+      });
+      resultCard.innerHTML=matches.map(record=>{const customer=record.customer||customers.find(item=>item.id===record.customerId)||{};return `<div class="record-row history-record-row"><div class="date-box"><b>${esc(String(record.visitDate||'').slice(8,10)||'--')}</b>${esc(String(record.visitDate||'').slice(5,7).replace(/^0/,'')||'--')}月</div><div><b>${esc(customer.name||'お客様情報なし')}</b><small class="muted">${esc(customer.phone||'電話番号未登録')}</small></div><div><b>${esc(record.values?.treatment||'施術記録')}</b><small class="muted">${esc(record.note||record.values?.concern||'')}</small></div><div><span class="badge">${esc(record.staff||'担当者未登録')}</span></div><button type="button" class="ghost detail-button-active" data-customer-id="${esc(record.customerId)}">詳細</button></div>`}).join('')||'<div class="empty">該当する施術履歴はありません</div>';
+      resultCard.querySelectorAll('.detail-button-active[data-customer-id]').forEach(button=>{button.onclick=()=>openCustomer(button.dataset.customerId)});
+    };
+    input.oninput=filterPatients;phoneInput.oninput=filterPatients;freewordInput.oninput=filterPatients;
+    filterPatients();
+  }catch(error){input.disabled=true;phoneInput.disabled=true;freewordInput.disabled=true;input.placeholder='お客様情報を取得できません';toast(error.message)}
 }
 function duration(seconds){const days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600),minutes=Math.floor(seconds%3600/60);return [days&&`${days}日`,hours&&`${hours}時間`,`${minutes}分`].filter(Boolean).join(' ')}
 async function renderAdmin(){const d=await api('/api/admin/operations');$('#content').innerHTML=`<section class="hero"><div><div class="eyebrow">SYSTEM STATUS</div><h2><span class="status-dot"></span>正常稼働中</h2><p>最終更新：${new Date(d.checkedAt).toLocaleString('ja-JP')}</p></div><button class="primary" onclick="show('admin')">↻ 運用状況を更新</button></section><div class="stats admin-stats"><div class="card stat"><div><small>サーバー稼働時間</small><b class="stat-text">${duration(d.uptimeSeconds)}</b></div><i>◷</i></div><div class="card stat"><div><small>データ保存</small><b class="stat-text">${esc(d.storage==='postgres'?'PostgreSQL':'ローカルJSON')}</b></div><i>▰</i></div><div class="card stat"><div><small>AI OCR</small><b class="stat-text">${d.ocrConfigured?'利用可能':'未設定'}</b></div><i>${d.ocrConfigured?'✓':'!'}</i></div></div><div class="admin-counts">${[['店舗',d.counts.tenants],['ユーザー',d.counts.users],['お客様',d.counts.customers],['カルテ',d.counts.records],['フォーム',d.counts.templates]].map(([label,value])=>`<div class="card admin-count"><small>${label}</small><b>${value}</b></div>`).join('')}</div><div class="section-head"><h2>店舗別の利用状況</h2><span class="badge">${esc(d.environment)} / ${esc(d.nodeVersion)}</span></div><div class="card admin-table"><div class="admin-row admin-row-head"><b>店舗</b><span>ユーザー</span><span>お客様</span><span>カルテ</span><span>フォーム</span></div>${d.tenantUsage.map(t=>`<div class="admin-row"><b>${esc(t.name)}</b><span>${t.users}</span><span>${t.customers}</span><span>${t.records}</span><span>${t.templates}</span></div>`).join('')}</div>`}
@@ -286,14 +438,41 @@ async function renderAdminCustomers(){
   };
 }
 async function renderDashboard(){const d=await api('/api/dashboard');$('#content').innerHTML=`<section class="home-identity"><div><small>契約会社名</small><b>${esc(state.user.tenant.companyName||'未登録')}</b></div><div><small>店舗名</small><b>${esc(state.user.tenant.name)}</b></div></section><section class="hero"><div><h2>${new Date().getHours()<12?'おはようございます':'お疲れさまです'}、${esc(state.user.name.split(' ')[0])}さん</h2><p>お客様の大切な情報を、今日の施術に活かしましょう。</p></div><button class="primary" onclick="show('scan')">＋ カルテを読み取る</button></section><div class="stats"><div class="card stat"><div><small>登録お客様</small><b>${d.customers}</b> 人</div><i>♙</i></div><div class="card stat"><div><small>今月のカルテ</small><b>${d.recordsThisMonth}</b> 件</div><i>▤</i></div><div class="card stat"><div><small>注意事項あり</small><b>${d.alerts}</b> 人</div><i>!</i></div></div><div class="section-head"><h2>最近の施術記録</h2><button class="link-btn" onclick="show('customers')">すべて見る →</button></div><div class="card">${d.recent.length?d.recent.map(r=>`<div class="record-row"><div class="date-box"><b>${r.visitDate.slice(8)}</b>${Number(r.visitDate.slice(5,7))}月</div><div><b>${esc(r.customer?.name)}</b><small class="muted">${esc(r.staff)} 担当</small></div><div>${esc(r.values.treatment||'施術記録')}</div><div>${r.alerts?.length?'<span class="badge alert">! 注意事項あり</span>':'<span class="badge">確認済み</span>'}</div><button class="ghost" onclick="openCustomer('${r.customerId}')">詳細</button></div>`).join(''):'<div class="empty">まだ記録がありません</div>'}</div>`}
-async function renderCustomers(){state.customers=await api('/api/customers');$('#content').innerHTML=`<div class="searchbar"><input id="customerSearch" placeholder="お名前・電話番号で検索"><button class="primary" id="addCustomer">＋ お客様を登録</button></div><div class="card" id="customerList"></div>`;const draw=()=>{const q=$('#customerSearch').value.toLowerCase();const rows=state.customers.filter(c=>(c.name+c.kana+c.phone).toLowerCase().includes(q));$('#customerList').innerHTML=rows.map(c=>`<div class="customer-row"><div class="avatar">${esc(c.name[0])}</div><div><b>${esc(c.name)}</b><small class="muted">${esc(c.kana)}</small></div><div>${esc(c.phone)}</div><div>${c.alerts.length?`<span class="badge alert">! ${esc(c.alerts[0])}</span>`:'<span class="badge">注意事項なし</span>'}</div><button class="ghost" onclick="openCustomer('${c.id}')">履歴を見る</button></div>`).join('')||'<div class="empty">該当するお客様はいません</div>'};draw();$('#customerSearch').oninput=draw;$('#addCustomer').onclick=addCustomer}
+async function renderCustomers(){state.customers=await api('/api/customers');$('#content').innerHTML=`<div class="searchbar"><input id="customerSearch" placeholder="お名前・電話番号で検索"></div><div class="card" id="customerList"></div>`;const draw=()=>{const q=$('#customerSearch').value.toLowerCase();const rows=state.customers.filter(c=>(c.name+c.kana+c.phone).toLowerCase().includes(q));$('#customerList').innerHTML=rows.map(c=>`<div class="customer-row"><div class="avatar">${esc(c.name[0])}</div><div><b>${esc(c.name)}</b><small class="muted">${esc(c.kana)}</small></div><div>${esc(c.phone)}</div><div>${c.alerts.length?`<span class="badge alert">! ${esc(c.alerts[0])}</span>`:'<span class="badge">注意事項なし</span>'}</div><button class="ghost" onclick="openCustomer('${c.id}')">履歴を見る</button></div>`).join('')||'<div class="empty">該当するお客様はいません</div>'};draw();$('#customerSearch').oninput=draw}
 async function addCustomer(){const name=prompt('お客様のお名前を入力してください');if(!name)return;const phone=prompt('電話番号（任意）')||'';const customer=await api('/api/customers',{method:'POST',body:JSON.stringify({name,phone})});toast(customer.billing?.tier==='paid'?`お客様を登録しました（有料対象 ${customer.billing.paidCustomers}名）`:`お客様を登録しました（無料枠 ${customer.billing?.companyCustomers||0}/30名）`);renderCustomers()}
-async function openCustomer(id){const d=await api(`/api/customers/${id}`),c=d.customer;$('#pageTitle').textContent='お客様カルテ';$('#pageSub').textContent='施術前に注意事項を確認してください';$('#content').innerHTML=`<button class="ghost" onclick="show('customers')">← 一覧に戻る</button><div class="detail-grid" style="margin-top:18px"><section class="card profile"><div class="avatar">${esc(c.name[0])}</div><h2>${esc(c.name)}</h2><p class="muted">${esc(c.kana)}<br>${esc(c.phone)}</p><div class="alert-box"><b>⚠ 施術前の注意事項</b>${c.alerts.length?`<ul>${c.alerts.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:'<p>登録なし</p>'}</div><h3>お好み・ご希望</h3><ul>${c.preferences.map(x=>`<li>${esc(x)}</li>`).join('')||'<li>登録なし</li>'}</ul><p class="muted">最終来店：${fmt(c.lastVisit)}</p></section><section><div class="section-head"><h2>施術タイムライン</h2><button class="primary" onclick="show('scan')">＋ 新しいカルテ</button></div><div class="timeline">${d.records.map(r=>`<article class="card"><div class="field-head"><b>${fmt(r.visitDate)}</b><span class="badge">${esc(r.staff)}</span></div>${r.alerts.length?`<div class="alert-box"><b>注意</b> ${r.alerts.map(esc).join(' ／ ')}</div>`:''}<h3>${esc(r.values.treatment||'施術記録')}</h3><p>${esc(r.note||r.values.concern||'')}</p><small class="muted">${Object.entries(r.values).filter(([k])=>!['treatment','concern'].includes(k)).map(([,v])=>v).filter(Boolean).map(esc).join(' ・ ')}</small></article>`).join('')||'<div class="empty">施術履歴はありません</div>'}</div></section></div>`}
+async function openCustomer(id){
+  const d=await api(`/api/customers/${id}`),c=d.customer;
+  const recordsOldestFirst=[...d.records].sort((a,b)=>String(a.visitDate||'').localeCompare(String(b.visitDate||'')));
+  const firstRecord=recordsOldestFirst.find(record=>record.values?.address||record.values?.email||record.values?.birthDate)||recordsOldestFirst[0];
+  const first={...(firstRecord?.values||{})};
+  const basicInfo=[
+    ['フリガナ',first.kana||c.kana],['お客様No.',first.customerNo],['メール',first.email],
+    ['電話番号',first.phone||c.phone],['住所',first.address],['生年月日',first.birthDate],['職業',first.occupation]
+  ];
+  $('#pageTitle').textContent='お客様カルテ';$('#pageSub').textContent='施術前に注意事項を確認してください';
+  $('#content').innerHTML=`<button type="button" class="ghost" id="backToCustomers">← 一覧に戻る</button><div class="detail-grid" style="margin-top:18px"><section class="card profile"><div class="avatar">${esc(c.name[0])}</div><h2>${esc(c.name)}</h2><p class="muted">${esc(c.kana)}<br>${esc(c.phone)}</p><div class="alert-box"><b>⚠ 施術前注意事項</b>${c.alerts.length?`<ul>${c.alerts.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:'<p>登録なし</p>'}</div><h3>お好み・ご希望</h3><ul>${c.preferences.map(x=>`<li>${esc(x)}</li>`).join('')||'<li>登録なし</li>'}</ul><p class="muted last-visit">最終来店：${fmt(c.lastVisit)}</p><section class="customer-basic-info"><h3>初回登録情報</h3>${basicInfo.map(([label,value])=>`<div><small>${esc(label)}</small><span>${esc(value||'未登録')}</span></div>`).join('')}</section></section><section><div class="section-head"><h2>施術タイムライン</h2></div><div class="timeline">${d.records.map(r=>`<article class="card"><div class="field-head"><b>${fmt(r.visitDate)}</b><span class="badge">${esc(r.staff)}</span></div>${r.alerts.length?`<div class="alert-box"><b>注意</b> ${r.alerts.map(esc).join(' ／ ')}</div>`:''}<h3>${esc(r.values.treatment||'施術記録')}</h3><p>${esc(r.note||r.values.concern||'')}</p><small class="muted">${Object.entries(r.values).filter(([k])=>!['treatment','concern'].includes(k)).map(([,v])=>v).filter(Boolean).map(esc).join(' ・ ')}</small></article>`).join('')||'<div class="empty">施術履歴はありません</div>'}</div></section></div>`;
+  const alertBox=$('.profile .alert-box'),alertTitle=alertBox.querySelector('b');
+  const alertHeader=document.createElement('div');alertHeader.className='alert-box-heading';
+  const editAlertButton=document.createElement('button');editAlertButton.type='button';editAlertButton.className='ghost add-alert-button';editAlertButton.textContent='注意を追加';
+  alertBox.insertBefore(alertHeader,alertBox.firstChild);alertHeader.append(alertTitle,editAlertButton);
+  const alertEditor=document.createElement('div');alertEditor.className='alert-editor hidden';
+  const alertTextarea=document.createElement('textarea');alertTextarea.rows=4;alertTextarea.value=(c.alerts||[]).join('\n');alertTextarea.placeholder='注意事項を1行に1件ずつ入力してください';
+  const alertActions=document.createElement('div');alertActions.className='alert-editor-actions';
+  const cancelAlertButton=document.createElement('button');cancelAlertButton.type='button';cancelAlertButton.className='ghost';cancelAlertButton.textContent='キャンセル';
+  const saveAlertButton=document.createElement('button');saveAlertButton.type='button';saveAlertButton.className='primary';saveAlertButton.textContent='保存';
+  alertActions.append(cancelAlertButton,saveAlertButton);alertEditor.append(alertTextarea,alertActions);alertBox.append(alertEditor);
+  const toggleAlertEditor=showEditor=>{alertEditor.classList.toggle('hidden',!showEditor);[...alertBox.children].filter(child=>child!==alertHeader&&child!==alertEditor).forEach(child=>child.classList.toggle('hidden',showEditor));if(showEditor)alertTextarea.focus()};
+  editAlertButton.onclick=()=>toggleAlertEditor(true);cancelAlertButton.onclick=()=>toggleAlertEditor(false);
+  saveAlertButton.onclick=async()=>{saveAlertButton.disabled=true;try{const alerts=alertTextarea.value.split(/\r?\n/).map(value=>value.trim()).filter(Boolean);await api(`/api/customers/${id}`,{method:'PUT',body:JSON.stringify({alerts})});toast('注意事項を保存しました');await openCustomer(id)}catch(error){toast(error.message);saveAlertButton.disabled=false}};
+  const timelineArticles=$$('.timeline article');
+  d.records.forEach((record,index)=>{const images=(record.images||[]).filter(Boolean);const article=timelineArticles[index];if(!article||!images.length)return;const gallery=document.createElement('div');gallery.className='record-image-gallery';images.forEach((source,imageIndex)=>{const image=document.createElement('img');image.src=source;image.alt=`保存したカルテ画像 ${imageIndex+1}枚目`;image.loading='lazy';image.tabIndex=0;image.setAttribute('role','button');image.onclick=()=>openRecordImage(source,image.alt);image.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();openRecordImage(source,image.alt)}};gallery.append(image)});article.append(gallery)});
+  $('#backToCustomers').onclick=()=>show('dashboard');
+}
 async function ensureScanData(){if(!state.customers.length)state.customers=await api('/api/customers');if(!state.templates.length)state.templates=await api('/api/templates');state.selectedTemplate=state.selectedTemplate||state.templates[0]}
 async function renderScan(){await ensureScanData();const t=state.selectedTemplate;$('#content').innerHTML=`<div class="scan-layout"><section class="card upload"><div class="toolbar"><label>カルテフォーム<select id="scanTemplate">${state.templates.map(x=>`<option value="${x.id}" ${x.id===t.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label><label>画像を選択<input id="scanFile" type="file" accept="image/png,image/jpeg,image/webp"></label></div><div class="dropzone" id="dropzone">${state.image?`<img src="${state.image}" alt="カルテ画像">`:'<div><div class="empty-icon">▧</div><b>カルテ画像を選択してください</b><p class="muted">PNG / JPEG / WEBP</p></div>'}</div><div class="progress"><i id="ocrProgress"></i></div><div class="actions"><button class="ghost" id="demoOcr">サンプルで試す</button><button class="primary" id="runOcr" ${state.image?'':'disabled'}>✦ AI OCRを実行</button></div></section><section class="card"><div class="section-head"><h2>読取結果の確認</h2><span class="badge">保存前に修正できます</span></div><div id="ocrForm">${state.scan?scanForm(t,state.scan):'<div class="empty">左側で画像を選び<br>AI OCRを実行してください</div>'}</div></section></div>`;$('#scanTemplate').onchange=e=>{state.selectedTemplate=state.templates.find(x=>x.id===e.target.value);state.scan=null;renderScan()};$('#scanFile').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{state.image=r.result;renderScan()};r.readAsDataURL(f)};$('#demoOcr').onclick=()=>doOcr(true);$('#runOcr').onclick=()=>doOcr(false);bindScanSave()}
 function scanForm(t,result){return `<div class="toolbar"><label>紐づけるお客様<select id="recordCustomer"><option value="">選択してください</option>${state.customers.map(c=>`<option value="${c.id}" ${result.customerName===c.name?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label><label>来店日<input id="recordDate" type="date" value="${esc(result.visitDate||new Date().toISOString().slice(0,10))}"></label></div>${result.alerts?.length?`<div class="alert-box"><b>⚠ AIが注意事項を検出しました</b><div id="alertChips">${result.alerts.map((x,i)=>`<label style="display:flex;margin:9px 0"><input type="checkbox" checked value="${esc(x)}"> ${esc(x)}</label>`).join('')}</div></div>`:''}<div class="form-fields">${t.fields.map(f=>{const v=result.values?.[f.id]||'',cf=result.confidence?.[f.id];return `<label class="${f.alert?'alert-field':''}"><span class="field-head"><span>${esc(f.label)}${f.required?' *':''}</span>${cf?`<span class="confidence ${cf<.85?'low':''}">読取確度 ${Math.round(cf*100)}%</span>`:''}</span>${f.type==='textarea'?`<textarea data-field="${f.id}" rows="2">${esc(v)}</textarea>`:`<input data-field="${f.id}" type="${f.type==='date'?'date':'text'}" value="${esc(v)}">`}</label>`}).join('')}<label>スタッフメモ<textarea id="recordNote" rows="3" placeholder="施術後の状態、次回への申し送りなど"></textarea></label></div><div class="actions"><button class="primary" id="saveRecord">この内容でカルテを保存</button></div>`}
 async function doOcr(demo){try{$('#ocrProgress').style.width='35%';$('#runOcr').disabled=true;const result=await api(demo?'/api/ocr/demo':'/api/ocr',{method:'POST',body:JSON.stringify({templateId:state.selectedTemplate.id,image:state.image})});$('#ocrProgress').style.width='100%';state.scan=result;renderScan();toast('読取が完了しました。内容を確認してください')}catch(e){toast(e.message);$('#ocrProgress').style.width='0';$('#runOcr').disabled=false}}
-function bindScanSave(){const b=$('#saveRecord');if(!b)return;b.onclick=async()=>{try{const values=Object.fromEntries($$('[data-field]').map(el=>[el.dataset.field,el.value]));const alerts=$$('#alertChips input:checked').map(x=>x.value);await api('/api/records',{method:'POST',body:JSON.stringify({customerId:$('#recordCustomer').value,visitDate:$('#recordDate').value,templateId:state.selectedTemplate.id,values,alerts,note:$('#recordNote').value})});state.scan=null;state.image='';toast('カルテを保存しました');show('dashboard')}catch(e){toast(e.message)}}}
+function bindScanSave(){const b=$('#saveRecord');if(!b)return;b.onclick=async()=>{try{const values=Object.fromEntries($$('[data-field]').map(el=>[el.dataset.field,el.value]));const alerts=$$('#alertChips input:checked').map(x=>x.value);const images=imagesForRecord();await api('/api/records',{method:'POST',body:JSON.stringify({customerId:$('#recordCustomer').value,visitDate:$('#recordDate').value,templateId:state.selectedTemplate.id,values,alerts,note:$('#recordNote').value,images})});state.scan=null;state.image='';state.images=[];state.partImages[state.workflowStage]='';toast('カルテ画像と部位写真を保存しました');show('dashboard')}catch(e){toast(e.message)}}}
 async function renderAccounts(){
   const accounts=await api('/api/accounts');
   $('#content').innerHTML=`<section class="card"><div class="section-head"><h2>施術者アカウントを作成</h2><span class="badge">${esc(state.user.tenant.name)}</span></div><form id="accountForm" class="account-form"><label>施術者名<input name="name" required placeholder="例：山田 花子"></label><label>アカウント名<input name="accountId" required minlength="3" pattern="[A-Za-z0-9._-]+" placeholder="例：yamada01"></label><label>初期パスワード<input name="password" type="password" required minlength="8" autocomplete="new-password"></label><button class="primary">アカウントを作成</button></form><p id="accountError" class="error"></p></section><div class="section-head"><h2>店舗アカウント</h2><span class="badge">${accounts.length}件</span></div><div class="account-grid">${accounts.map(account=>`<article class="card account-card"><div class="avatar">${esc(account.name[0]||'施')}</div><div><b>${esc(account.name)}</b><span class="account-id">${esc(account.accountId)}</span><small>${account.role==='owner'?'店舗管理者':'施術者'}</small></div>${account.protected?'<span class="protected-badge">管理者作成・削除不可</span>':`<button class="danger-btn account-delete" data-id="${esc(account.id)}" data-name="${esc(account.name)}">削除</button>`}</article>`).join('')||'<div class="card empty">アカウントがありません</div>'}</div>`;

@@ -225,6 +225,12 @@
 .customer-basic-info span { min-width: 0; overflow-wrap: anywhere; }
 .alert-box-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .add-alert-button { padding: 7px 10px; background: #fff; color: #9a5047; border-color: #e8c2b8; white-space: nowrap; }
+.preference-box { margin-top: 14px; padding: 14px; border: 1px solid #d8c8eb; border-radius: 12px; background: #faf7ff; }
+.preference-box h3 { margin: 0; }
+.preference-box-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.add-preference-button { padding: 7px 10px; background: #fff; color: #765598; border-color: #d8c8eb; white-space: nowrap; }
+.preference-editor { margin-top: 12px; }
+.preference-editor textarea { width: 100%; resize: vertical; background: #fff; border-color: #d8c8eb; }
 .alert-editor { margin-top: 12px; }
 .alert-editor textarea { width: 100%; resize: vertical; background: #fff; }
 .alert-editor-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }

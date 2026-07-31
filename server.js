@@ -423,8 +423,9 @@ async function api(req, res, pathname) {
     const customer = tenantRows('customers', user).find(x => x.id === cm[1]);
     if (!customer) return json(res, 404, { error: 'お客様が見つかりません' });
     const b = await body(req);
-    if (!Array.isArray(b.alerts)) return json(res, 400, { error: '注意事項を正しく入力してください' });
-    customer.alerts = [...new Set(b.alerts.map(value => String(value).trim()).filter(Boolean))].slice(0, 50);
+    if (!Array.isArray(b.alerts) && !Array.isArray(b.preferences)) return json(res, 400, { error: '更新内容を正しく入力してください' });
+    if (Array.isArray(b.alerts)) customer.alerts = [...new Set(b.alerts.map(value => String(value).trim()).filter(Boolean))].slice(0, 50);
+    if (Array.isArray(b.preferences)) customer.preferences = [...new Set(b.preferences.map(value => String(value).trim()).filter(Boolean))].slice(0, 50);
     await save();
     return json(res, 200, customer);
   }

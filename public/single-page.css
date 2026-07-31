@@ -236,9 +236,17 @@
 .gender-badge.unset { color: #666; background: #eee; }
 .customer-basic-info { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
 .customer-basic-info h3 { margin: 0 0 8px; }
-.customer-basic-info > div { display: grid; grid-template-columns: 82px 1fr; gap: 8px; padding: 8px 0; border-bottom: 1px solid #edf0ee; }
+.customer-basic-info-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.customer-basic-info-heading h3 { margin: 0; }
+.customer-basic-info-heading button { padding: 7px 13px; }
+#basicInfoView > div { display: grid; grid-template-columns: 82px 1fr; gap: 8px; padding: 8px 0; border-bottom: 1px solid #edf0ee; }
 .customer-basic-info small { color: var(--muted); font-weight: 700; }
 .customer-basic-info span { min-width: 0; overflow-wrap: anywhere; }
+.customer-basic-info-form { display: grid; gap: 10px; margin-top: 12px; }
+.customer-basic-info-form label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.customer-basic-info-form input { width: 100%; }
+.customer-basic-info-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.customer-basic-info-form .error { margin: 0; }
 .alert-box-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .add-alert-button { padding: 7px 10px; background: #fff; color: #9a5047; border-color: #e8c2b8; white-space: nowrap; }
 .preference-box { margin-top: 14px; padding: 14px; border: 1px solid #d8c8eb; border-radius: 12px; background: #faf7ff; }

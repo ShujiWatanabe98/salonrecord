@@ -476,10 +476,21 @@ async function api(req, res, pathname) {
     const customer = tenantRows('customers', user).find(x => x.id === cm[1]);
     if (!customer) return json(res, 404, { error: 'お客様が見つかりません' });
     const b = await body(req);
-    if (!Array.isArray(b.alerts) && !Array.isArray(b.preferences) && b.gender === undefined) return json(res, 400, { error: '更新内容を正しく入力してください' });
+    if (!Array.isArray(b.alerts) && !Array.isArray(b.preferences) && b.gender === undefined && b.name === undefined && b.kana === undefined && b.phone === undefined && !b.initialInfo) return json(res, 400, { error: '更新内容を正しく入力してください' });
+    if (b.name !== undefined) { const name = String(b.name).trim(); if (!name) return json(res, 400, { error: 'お客様名を入力してください' }); customer.name = name.slice(0, 100); }
+    if (b.kana !== undefined) customer.kana = String(b.kana).trim().slice(0, 100);
+    if (b.phone !== undefined) customer.phone = String(b.phone).trim().slice(0, 40);
     if (Array.isArray(b.alerts)) customer.alerts = [...new Set(b.alerts.map(value => String(value).trim()).filter(Boolean))].slice(0, 50);
     if (Array.isArray(b.preferences)) customer.preferences = [...new Set(b.preferences.map(value => String(value).trim()).filter(Boolean))].slice(0, 50);
     if (b.gender !== undefined) { if (!['male', 'female', ''].includes(b.gender)) return json(res, 400, { error: '性別区分が不正です' }); customer.gender = b.gender; }
+    if (b.initialInfo && typeof b.initialInfo === 'object') {
+      const records = tenantRows('records', user).filter(row => row.customerId === customer.id).sort((a, b) => String(a.visitDate || '').localeCompare(String(b.visitDate || '')));
+      const firstRecord = records.find(record => record.values?.address || record.values?.email || record.values?.birthDate) || records[0];
+      if (firstRecord) {
+        firstRecord.values ||= {};
+        for (const key of ['customerNo', 'email', 'address', 'birthDate', 'occupation']) firstRecord.values[key] = String(b.initialInfo[key] || '').trim().slice(0, 500);
+      }
+    }
     await save();
     return json(res, 200, customer);
   }

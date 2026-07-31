@@ -77,6 +77,8 @@ const body = req => new Promise((resolve, reject) => { let s = '', stopped = fal
 const tokenOf = req => (req.headers.authorization || '').replace(/^Bearer /, '');
 const auth = async req => { const userId = await storage.findSession(tokenOf(req)); return db.users.find(u => u.id === userId); };
 const tenantRows = (name, user) => db[name].filter(x => x.tenantId === user.tenantId);
+const companyTenantIds = user => { const tenant=db.tenants.find(row=>row.id===user.tenantId); if(!tenant?.companyName)return [user.tenantId]; return db.tenants.filter(row=>row.companyName===tenant.companyName).map(row=>row.id); };
+const companyRows = (name, user) => { const tenantIds=companyTenantIds(user); return db[name].filter(row=>tenantIds.includes(row.tenantId)); };
 const id = prefix => prefix + crypto.randomUUID().slice(0, 8);
 
 function safeUser(user) { const { password, passwordHash, ...rest } = user; return { ...rest, tenant: db.tenants.find(t => t.id === user.tenantId) }; }
@@ -405,7 +407,7 @@ async function api(req, res, pathname) {
     await save();
     return json(res, 200, { deleted: { id: target.id, name: target.name, accountId: target.email } });
   }
-  if (pathname === '/api/customers' && req.method === 'GET') return json(res, 200, tenantRows('customers', user));
+  if (pathname === '/api/customers' && req.method === 'GET') return json(res, 200, companyRows('customers', user).map(customer=>({...customer,storeName:db.tenants.find(tenant=>tenant.id===customer.tenantId)?.name||''})));
   if (pathname === '/api/customers' && req.method === 'POST') {
     const b = await body(req);
     const tenant = db.tenants.find(row => row.id === user.tenantId);
@@ -418,7 +420,7 @@ async function api(req, res, pathname) {
     return json(res, 201, { ...row, billing: { tier: billingTier, companyCustomers: currentCompanyCustomers + 1, freeLimit: FREE_CUSTOMERS_PER_COMPANY, paidCustomers: Math.max(0, currentCompanyCustomers + 1 - FREE_CUSTOMERS_PER_COMPANY) } });
   }
   const cm = pathname.match(/^\/api\/customers\/([^/]+)$/);
-  if (cm && req.method === 'GET') { const customer = tenantRows('customers', user).find(x => x.id === cm[1]); if (!customer) return json(res, 404, { error: '顧客が見つかりません' }); return json(res, 200, { customer, records: tenantRows('records', user).filter(r => r.customerId === customer.id).sort((a,b) => b.visitDate.localeCompare(a.visitDate)) }); }
+  if (cm && req.method === 'GET') { const customer = companyRows('customers', user).find(x => x.id === cm[1]); if (!customer) return json(res, 404, { error: 'お客様が見つかりません' }); const sourceStore=db.tenants.find(tenant=>tenant.id===customer.tenantId)?.name||''; return json(res, 200, { customer:{...customer,storeName:sourceStore}, records:companyRows('records', user).filter(r => r.customerId === customer.id).sort((a,b) => b.visitDate.localeCompare(a.visitDate)), canEdit:customer.tenantId===user.tenantId, sourceStore }); }
   if (cm && req.method === 'PUT') {
     const customer = tenantRows('customers', user).find(x => x.id === cm[1]);
     if (!customer) return json(res, 404, { error: 'お客様が見つかりません' });

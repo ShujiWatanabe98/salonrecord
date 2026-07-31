@@ -478,6 +478,8 @@ async function openCustomer(id){
   ];
   $('#pageTitle').textContent='お客様カルテ';$('#pageSub').textContent='施術前に注意事項を確認してください';
   $('#content').innerHTML=`<button type="button" class="ghost" id="backToCustomers">← 一覧に戻る</button><div class="detail-grid" style="margin-top:18px"><section class="card profile"><div class="avatar">${esc(c.name[0])}</div><h2>${esc(c.name)}</h2><p class="muted">${esc(c.kana)}<br>${esc(c.phone)}</p><div class="alert-box"><b>⚠ 施術前注意事項</b>${c.alerts.length?`<ul>${c.alerts.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:'<p>登録なし</p>'}</div><h3>お好み・ご希望</h3><ul>${c.preferences.map(x=>`<li>${esc(x)}</li>`).join('')||'<li>登録なし</li>'}</ul><p class="muted last-visit">最終来店：${fmt(c.lastVisit)}</p><section class="customer-basic-info"><h3>初回登録情報</h3>${basicInfo.map(([label,value])=>`<div><small>${esc(label)}</small><span>${esc(value||'未登録')}</span></div>`).join('')}</section></section><section><div class="section-head"><h2>施術タイムライン</h2></div><div class="timeline">${d.records.map(r=>`<article class="card"><div class="field-head"><b>${fmt(r.visitDate)}</b><span class="badge">${esc(r.staff)}</span></div>${r.alerts.length?`<div class="alert-box"><b>注意</b> ${r.alerts.map(esc).join(' ／ ')}</div>`:''}<h3>${esc(r.values.treatment||'施術記録')}</h3><p>${esc(r.note||r.values.concern||'')}</p><small class="muted">${Object.entries(r.values).filter(([k])=>!['treatment','concern'].includes(k)).map(([,v])=>v).filter(Boolean).map(esc).join(' ・ ')}</small></article>`).join('')||'<div class="empty">施術履歴はありません</div>'}</div></section></div>`;
+  const profileContact=$('.profile > p.muted');
+  if(profileContact&&d.sourceStore){const storeLabel=document.createElement('p');storeLabel.className=`customer-source-store${d.canEdit?'':' read-only'}`;storeLabel.textContent=`登録店舗：${d.sourceStore}${d.canEdit?'':'（閲覧のみ）'}`;profileContact.insertAdjacentElement('afterend',storeLabel)}
   const preferenceTitle=[...$$('.profile > h3')].find(element=>element.textContent==='お好み・ご希望');
   const preferenceList=preferenceTitle?.nextElementSibling;
   const preferenceBox=document.createElement('div');preferenceBox.className='preference-box';
@@ -485,6 +487,7 @@ async function openCustomer(id){
   const alertBox=$('.profile .alert-box'),alertTitle=alertBox.querySelector('b');
   const alertHeader=document.createElement('div');alertHeader.className='alert-box-heading';
   const editAlertButton=document.createElement('button');editAlertButton.type='button';editAlertButton.className='ghost add-alert-button';editAlertButton.textContent='注意を追加';
+  if(!d.canEdit){editAlertButton.classList.add('hidden');editAlertButton.title='登録店舗で編集できます'}
   alertBox.insertBefore(alertHeader,alertBox.firstChild);alertHeader.append(alertTitle,editAlertButton);
   const alertEditor=document.createElement('div');alertEditor.className='alert-editor hidden';
   const alertTextarea=document.createElement('textarea');alertTextarea.rows=4;alertTextarea.value=(c.alerts||[]).join('\n');alertTextarea.placeholder='注意事項を1行に1件ずつ入力してください';
@@ -497,6 +500,7 @@ async function openCustomer(id){
   saveAlertButton.onclick=async()=>{saveAlertButton.disabled=true;try{const alerts=alertTextarea.value.split(/\r?\n/).map(value=>value.trim()).filter(Boolean);await api(`/api/customers/${id}`,{method:'PUT',body:JSON.stringify({alerts})});toast('注意事項を保存しました');await openCustomer(id)}catch(error){toast(error.message);saveAlertButton.disabled=false}};
   const preferenceHeader=document.createElement('div');preferenceHeader.className='preference-box-heading';
   const editPreferenceButton=document.createElement('button');editPreferenceButton.type='button';editPreferenceButton.className='ghost add-preference-button';editPreferenceButton.textContent='好みを追加';
+  if(!d.canEdit){editPreferenceButton.classList.add('hidden');editPreferenceButton.title='登録店舗で編集できます'}
   preferenceBox.insertBefore(preferenceHeader,preferenceBox.firstChild);preferenceHeader.append(preferenceTitle,editPreferenceButton);
   const preferenceEditor=document.createElement('div');preferenceEditor.className='preference-editor hidden';
   const preferenceTextarea=document.createElement('textarea');preferenceTextarea.rows=4;preferenceTextarea.value=(c.preferences||[]).join('\n');preferenceTextarea.placeholder='好み・ご希望を1行に1件ずつ入力してください';

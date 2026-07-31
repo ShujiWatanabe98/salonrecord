@@ -372,7 +372,7 @@ async function api(req, res, pathname) {
     return json(res, 200, { deleted: { id: tenant.id, name: tenant.name, ...removed } });
   }
   if (pathname === '/api/dashboard') {
-    const customers = tenantRows('customers', user), records = tenantRows('records', user);
+    const customers = companyRows('customers', user), records = companyRows('records', user);
     return json(res, 200, { customers: customers.length, recordsThisMonth: records.filter(r => r.visitDate.startsWith(new Date().toISOString().slice(0, 7))).length, alerts: customers.filter(c => c.alerts.length).length, recent: [...records].sort((a,b) => b.visitDate.localeCompare(a.visitDate)).slice(0, 5).map(r => ({ ...r, customer: customers.find(c => c.id === r.customerId) })) });
   }
   if (pathname === '/api/accounts' && req.method === 'GET') {
@@ -445,9 +445,13 @@ async function api(req, res, pathname) {
   if (pathname === '/api/ocr' && req.method === 'POST') { const b = await body(req); const template = tenantRows('templates', user).find(x => x.id === b.templateId); if (!template) return json(res, 404, { error: 'テンプレートが見つかりません' }); return json(res, 200, await runOcr(b.image, template)); }
   if (pathname === '/api/ocr/demo' && req.method === 'POST') return json(res, 200, { customerName: '山田 花子', visitDate: new Date().toISOString().slice(0,10), values: { name: '山田 花子', visitDate: new Date().toISOString().slice(0,10), concern: '頬の乾燥、夕方のくすみが気になる', allergy: 'ラテックスアレルギーあり', redness: 'アルコール配合化粧水で赤みが出やすい', treatment: '保湿フェイシャル 60分', preference: '香りのない製品、マッサージは弱め希望' }, confidence: { name: .98, visitDate: .96, concern: .87, allergy: .93, redness: .84, treatment: .91, preference: .86 }, alerts: ['ラテックスアレルギー', 'アルコール成分で赤みが出やすい'] });
   if (pathname === '/api/records' && req.method === 'GET') {
-    const customers = tenantRows('customers', user);
-    const records = tenantRows('records', user)
-      .map(record => ({ ...record, customer: customers.find(customer => customer.id === record.customerId) || null }))
+    const customers = companyRows('customers', user);
+    const records = companyRows('records', user)
+      .map(record => ({
+        ...record,
+        customer: customers.find(customer => customer.id === record.customerId) || null,
+        storeName: db.tenants.find(tenant => tenant.id === record.tenantId)?.name || ''
+      }))
       .sort((a, b) => String(b.visitDate || '').localeCompare(String(a.visitDate || '')));
     return json(res, 200, records);
   }

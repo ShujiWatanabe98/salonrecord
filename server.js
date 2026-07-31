@@ -331,6 +331,21 @@ async function api(req, res, pathname) {
     return json(res, 200, { companyName, serviceStatus: b.status, storesUpdated: stores.length, changedAt });
   }
   const adminTenantMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)$/);
+  const adminTenantCustomerMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)\/customers$/);
+  if (adminTenantCustomerMatch && req.method === 'POST') {
+    if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
+    const tenantId = decodeURIComponent(adminTenantCustomerMatch[1]);
+    const tenant = db.tenants.find(row => row.id === tenantId);
+    if (!tenant) return json(res, 404, { error: '店舗が見つかりません' });
+    const b = await body(req);
+    const name = String(b.name || '').trim(), kana = String(b.kana || '').trim(), phone = String(b.phone || '').trim();
+    if (!name) return json(res, 400, { error: 'お客様名を入力してください' });
+    if (db.customers.some(row => row.tenantId === tenantId && row.name === name && String(row.phone || '') === phone)) return json(res, 409, { error: '同じお客様が登録済みです' });
+    const companyIds = db.tenants.filter(row => tenant.companyName ? row.companyName === tenant.companyName : row.id === tenantId).map(row => row.id);
+    const currentCompanyCustomers = db.customers.filter(row => companyIds.includes(row.tenantId)).length;
+    const row = { id: id('c'), tenantId, name, kana, phone, gender: ['male', 'female'].includes(b.gender) ? b.gender : '', lastVisit: '', alerts: Array.isArray(b.alerts) ? b.alerts : [], preferences: Array.isArray(b.preferences) ? b.preferences : [], billingTier: currentCompanyCustomers >= FREE_CUSTOMERS_PER_COMPANY ? 'paid' : 'free', sample: b.sample === true };
+    db.customers.push(row); await save(); return json(res, 201, row);
+  }
   if (adminTenantMatch && req.method === 'PUT') {
     if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
     const tenantId = decodeURIComponent(adminTenantMatch[1]);

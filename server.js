@@ -277,6 +277,25 @@ async function api(req, res, pathname) {
     await save();
     return json(res, 201, { tenant, account: { id: account.id, accountId: account.email, name: account.name } });
   }
+  if (pathname === '/api/admin/import-local-data' && req.method === 'POST') {
+    if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
+    const b = await body(req);
+    const imported = b.data;
+    const required = ['tenants', 'users', 'customers', 'templates', 'records'];
+    if (!imported || required.some(key => !Array.isArray(imported[key]))) return json(res, 400, { error: '移行データの形式が不正です' });
+    const systemAdmin = db.users.find(row => row.role === 'system_admin');
+    const next = {
+      tenants: structuredClone(imported.tenants),
+      users: structuredClone(imported.users).filter(row => row.role !== 'system_admin'),
+      customers: structuredClone(imported.customers),
+      templates: structuredClone(imported.templates),
+      records: structuredClone(imported.records)
+    };
+    if (systemAdmin) next.users.unshift(systemAdmin);
+    db = next;
+    await save();
+    return json(res, 200, { imported: Object.fromEntries(required.map(key => [key, db[key].length])) });
+  }
   if (pathname === '/api/admin/companies' && req.method === 'PUT') {
     if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
     const b = await body(req);

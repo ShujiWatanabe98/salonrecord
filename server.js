@@ -517,7 +517,7 @@ async function provisionStoresFromEnvironment() {
     }
     if (!tenant) {
       const sourceUser = db.users.find(u => u.email.toLowerCase() === spec.email.toLowerCase());
-      if (!sourceUser) throw new Error(`${spec.email} の既存管理者が見つかりません`);
+      if (!sourceUser) { console.warn(`Skipped legacy store provisioning: ${spec.email} の既存管理者が見つかりません`); continue; }
       const suffix = crypto.createHash('sha256').update(`${spec.email}:${spec.name}`).digest('hex').slice(0, 12);
       tenant = { id: `tenant-${suffix}`, name: spec.name, plan: 'スタンダード' };
       user = { id: `owner-${suffix}`, tenantId: tenant.id, name: spec.adminName, email: spec.email, passwordHash: sourceUser.passwordHash, role: 'owner' };

@@ -332,6 +332,7 @@ async function api(req, res, pathname) {
   }
   const adminTenantMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)$/);
   const adminTenantCustomerMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)\/customers$/);
+  const adminTenantCustomerDeleteMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)\/customers\/([^/]+)$/);
   const adminTenantGenderBackfillMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)\/backfill-gender$/);
   if (adminTenantGenderBackfillMatch && req.method === 'POST') {
     if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
@@ -364,6 +365,18 @@ async function api(req, res, pathname) {
     const currentCompanyCustomers = db.customers.filter(row => companyIds.includes(row.tenantId)).length;
     const row = { id: id('c'), tenantId, name, kana, phone, gender: ['male', 'female'].includes(b.gender) ? b.gender : '', lastVisit: '', alerts: Array.isArray(b.alerts) ? b.alerts : [], preferences: Array.isArray(b.preferences) ? b.preferences : [], billingTier: currentCompanyCustomers >= FREE_CUSTOMERS_PER_COMPANY ? 'paid' : 'free', sample: b.sample === true };
     db.customers.push(row); await save(); return json(res, 201, row);
+  }
+  if (adminTenantCustomerDeleteMatch && req.method === 'DELETE') {
+    if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
+    const tenantId = decodeURIComponent(adminTenantCustomerDeleteMatch[1]);
+    const customerId = decodeURIComponent(adminTenantCustomerDeleteMatch[2]);
+    const customer = db.customers.find(row => row.id === customerId && row.tenantId === tenantId);
+    if (!customer) return json(res, 404, { error: 'お客様が見つかりません' });
+    const recordsDeleted = db.records.filter(row => row.customerId === customerId && row.tenantId === tenantId).length;
+    db.customers = db.customers.filter(row => row.id !== customerId || row.tenantId !== tenantId);
+    db.records = db.records.filter(row => row.customerId !== customerId || row.tenantId !== tenantId);
+    await save();
+    return json(res, 200, { deleted: { id: customer.id, name: customer.name, recordsDeleted } });
   }
   if (adminTenantMatch && req.method === 'PUT') {
     if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });

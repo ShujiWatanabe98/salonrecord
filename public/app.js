@@ -366,7 +366,8 @@ async function setupDashboardPatientSearch(sectionHead){
   phoneInput.type='search';phoneInput.inputMode='tel';phoneInput.className='patient-search-input';phoneInput.placeholder='電話番号で検索';phoneInput.setAttribute('aria-label','電話番号で検索');
   const freewordInput=document.createElement('input');
   freewordInput.type='search';freewordInput.className='patient-search-input';freewordInput.placeholder='フリーワード検索';freewordInput.setAttribute('aria-label','フリーワード検索');
-  searchFields.append(input,phoneInput,freewordInput);
+  const genderFilter=document.createElement('select');genderFilter.className='patient-gender-filter';genderFilter.setAttribute('aria-label','男女で表示を切り替え');genderFilter.innerHTML='<option value="">男女すべて</option><option value="male">男性</option><option value="female">女性</option>';
+  searchFields.append(genderFilter,input,phoneInput,freewordInput);
   if(oldAction)oldAction.replaceWith(searchFields);else sectionHead.append(searchFields);
   try{
     const [customers,records]=await Promise.all([api('/api/customers'),api('/api/records')]);
@@ -374,19 +375,22 @@ async function setupDashboardPatientSearch(sectionHead){
       const query=input.value.trim().toLowerCase();
       const phoneQuery=phoneInput.value.replace(/\D/g,'');
       const freewordQuery=freewordInput.value.trim().toLowerCase();
+      const gender=genderFilter.value;
       const matches=records.filter(record=>{
         const customer=record.customer||customers.find(item=>item.id===record.customerId)||{};
+        const recordGender=customer.gender||(['male','female'].includes(record.chartGender)?record.chartGender:'');
+        const genderMatches=!gender||recordGender===gender;
         const nameMatches=`${customer.name||''} ${customer.kana||''}`.toLowerCase().includes(query);
         const phoneMatches=String(customer.phone||'').replace(/\D/g,'').includes(phoneQuery);
         const freewordMatches=`${JSON.stringify(customer)} ${JSON.stringify(record)}`.toLowerCase().includes(freewordQuery);
-        return nameMatches&&phoneMatches&&freewordMatches;
+        return genderMatches&&nameMatches&&phoneMatches&&freewordMatches;
       });
-      resultCard.innerHTML=matches.map(record=>{const customer=record.customer||customers.find(item=>item.id===record.customerId)||{};return `<div class="record-row history-record-row"><div class="date-box"><b>${esc(String(record.visitDate||'').slice(8,10)||'--')}</b>${esc(String(record.visitDate||'').slice(5,7).replace(/^0/,'')||'--')}月</div><div><b>${esc(customer.name||'お客様情報なし')}</b><small class="muted">${esc(customer.phone||'電話番号未登録')}</small></div><div><b>${esc(record.values?.treatment||'施術記録')}</b><small class="muted">${esc(record.note||record.values?.concern||'')}</small></div><div><span class="badge">${esc(record.staff||'担当者未登録')}</span></div><button type="button" class="ghost detail-button-active" data-customer-id="${esc(record.customerId)}">詳細</button></div>`}).join('')||'<div class="empty">該当する施術履歴はありません</div>';
+      resultCard.innerHTML=matches.map(record=>{const customer=record.customer||customers.find(item=>item.id===record.customerId)||{},recordGender=customer.gender||record.chartGender||'';return `<div class="record-row history-record-row"><div class="date-box"><b>${esc(String(record.visitDate||'').slice(8,10)||'--')}</b>${esc(String(record.visitDate||'').slice(5,7).replace(/^0/,'')||'--')}月</div><div><b>${esc(customer.name||'お客様情報なし')}</b><small class="muted">${esc(customer.phone||'電話番号未登録')}</small></div><div><b>${esc(record.values?.treatment||'施術記録')}</b><small class="muted">${esc(record.note||record.values?.concern||'')}</small></div><div><span class="badge gender-badge ${esc(recordGender||'unset')}">${esc(genderLabel(recordGender))}</span> <span class="badge">${esc(record.staff||'担当者未登録')}</span></div><button type="button" class="ghost detail-button-active" data-customer-id="${esc(record.customerId)}">詳細</button></div>`}).join('')||'<div class="empty">該当する施術履歴はありません</div>';
       resultCard.querySelectorAll('.detail-button-active[data-customer-id]').forEach(button=>{button.onclick=()=>openCustomer(button.dataset.customerId)});
     };
-    input.oninput=filterPatients;phoneInput.oninput=filterPatients;freewordInput.oninput=filterPatients;
+    genderFilter.onchange=filterPatients;input.oninput=filterPatients;phoneInput.oninput=filterPatients;freewordInput.oninput=filterPatients;
     filterPatients();
-  }catch(error){input.disabled=true;phoneInput.disabled=true;freewordInput.disabled=true;input.placeholder='お客様情報を取得できません';toast(error.message)}
+  }catch(error){genderFilter.disabled=true;input.disabled=true;phoneInput.disabled=true;freewordInput.disabled=true;input.placeholder='お客様情報を取得できません';toast(error.message)}
 }
 function duration(seconds){const days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600),minutes=Math.floor(seconds%3600/60);return [days&&`${days}日`,hours&&`${hours}時間`,`${minutes}分`].filter(Boolean).join(' ')}
 async function renderAdmin(){const d=await api('/api/admin/operations');$('#content').innerHTML=`<section class="hero"><div><div class="eyebrow">SYSTEM STATUS</div><h2><span class="status-dot"></span>正常稼働中</h2><p>最終更新：${new Date(d.checkedAt).toLocaleString('ja-JP')}</p></div><button class="primary" onclick="show('admin')">↻ 運用状況を更新</button></section><div class="stats admin-stats"><div class="card stat"><div><small>サーバー稼働時間</small><b class="stat-text">${duration(d.uptimeSeconds)}</b></div><i>◷</i></div><div class="card stat"><div><small>データ保存</small><b class="stat-text">${esc(d.storage==='postgres'?'PostgreSQL':'ローカルJSON')}</b></div><i>▰</i></div><div class="card stat"><div><small>AI OCR</small><b class="stat-text">${d.ocrConfigured?'利用可能':'未設定'}</b></div><i>${d.ocrConfigured?'✓':'!'}</i></div></div><div class="admin-counts">${[['店舗',d.counts.tenants],['ユーザー',d.counts.users],['お客様',d.counts.customers],['カルテ',d.counts.records],['フォーム',d.counts.templates]].map(([label,value])=>`<div class="card admin-count"><small>${label}</small><b>${value}</b></div>`).join('')}</div><div class="section-head"><h2>店舗別の利用状況</h2><span class="badge">${esc(d.environment)} / ${esc(d.nodeVersion)}</span></div><div class="card admin-table"><div class="admin-row admin-row-head"><b>店舗</b><span>ユーザー</span><span>お客様</span><span>カルテ</span><span>フォーム</span></div>${d.tenantUsage.map(t=>`<div class="admin-row"><b>${esc(t.name)}</b><span>${t.users}</span><span>${t.customers}</span><span>${t.records}</span><span>${t.templates}</span></div>`).join('')}</div>`}

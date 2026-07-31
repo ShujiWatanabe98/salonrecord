@@ -182,7 +182,8 @@
 .ocr-save-button:disabled { opacity: .45; cursor: not-allowed; }
 .patient-search-fields { display: flex; gap: 8px; margin-left: auto; }
 .patient-search-input { width: min(260px, 30vw); margin: 0; }
-@media (max-width: 700px) { .patient-search-head { flex-wrap: wrap; } .patient-search-fields { width: 100%; flex-direction: column; } .patient-search-input { width: 100%; } }
+.patient-gender-filter { width: 130px; margin: 0; }
+@media (max-width: 700px) { .patient-search-head { flex-wrap: wrap; } .patient-search-fields { width: 100%; flex-direction: column; } .patient-search-input, .patient-gender-filter { width: 100%; } }
 .image-ocr-layout {
   display: grid;
   grid-template-columns: minmax(360px, 1fr) minmax(420px, .95fr);

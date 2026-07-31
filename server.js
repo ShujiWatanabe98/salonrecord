@@ -340,6 +340,11 @@ async function api(req, res, pathname) {
     const b = await body(req);
     const name = String(b.name || '').trim(), kana = String(b.kana || '').trim(), phone = String(b.phone || '').trim();
     if (!name) return json(res, 400, { error: 'お客様名を入力してください' });
+    const existingSample = b.sample === true ? db.customers.find(row => row.tenantId === tenantId && row.sample === true && String(row.phone || '') === phone) : null;
+    if (existingSample) {
+      Object.assign(existingSample, { name, kana, phone, gender: ['male', 'female'].includes(b.gender) ? b.gender : existingSample.gender || '', alerts: Array.isArray(b.alerts) ? b.alerts : existingSample.alerts || [], preferences: Array.isArray(b.preferences) ? b.preferences : existingSample.preferences || [], sample: true });
+      await save(); return json(res, 200, existingSample);
+    }
     if (db.customers.some(row => row.tenantId === tenantId && row.name === name && String(row.phone || '') === phone)) return json(res, 409, { error: '同じお客様が登録済みです' });
     const companyIds = db.tenants.filter(row => tenant.companyName ? row.companyName === tenant.companyName : row.id === tenantId).map(row => row.id);
     const currentCompanyCustomers = db.customers.filter(row => companyIds.includes(row.tenantId)).length;

@@ -1,5 +1,5 @@
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-const state = { token: sessionStorage.getItem('salonToken'), user: null, customers: [], templates: [], scan: null, image: '', images: [], partImages: { new: '', progress: '' }, treatmentType: 'フット', workflowStage: 'new', selectedTemplate: null, sheetValidationToken: 0 };
+const state = { token: sessionStorage.getItem('salonToken'), user: null, customers: [], templates: [], scan: null, image: '', images: [], partImages: { new: '', progress: '' }, treatmentType: 'フット', chartGender: 'common', workflowStage: 'new', selectedTemplate: null, sheetValidationToken: 0 };
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function setAiWorking(working){
   const icon=$('#aiStatus');if(!icon)return;
@@ -34,6 +34,8 @@ async function api(url, options={}, attempt=0) {
 function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2500)}
 function esc(v=''){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function fmt(d){if(!d)return '—';const x=new Date(d+'T00:00:00');return `${x.getFullYear()}年${x.getMonth()+1}月${x.getDate()}日`}
+function normalizeChartGender(value){return value==='男性用'?'male':value==='女性用'?'female':value==='男女共通'?'common':['male','female','common'].includes(value)?value:''}
+function genderLabel(value){return value==='male'?'男性用':value==='female'?'女性用':value==='common'?'男女共通':'未設定'}
 function todayDateValue(){const date=new Date();return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`}
 function optimizeImageSource(source,{maxDimension=2000,quality=.82}={}){
   return new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>{const scale=Math.min(1,maxDimension/Math.max(image.naturalWidth,image.naturalHeight));const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));canvas.getContext('2d',{alpha:false}).drawImage(image,0,0,canvas.width,canvas.height);resolve(canvas.toDataURL('image/jpeg',quality))};image.onerror=()=>reject(new Error('画像を最適化できませんでした'));image.src=source});
@@ -68,26 +70,23 @@ function createTreatmentActions(stage='new'){
 }
 function createCameraActions(stage='new'){
   const actions=document.createElement('div');actions.className='camera-actions';
-  const chartButton=document.createElement('button');chartButton.type='button';chartButton.className='ghost camera-chart-button';chartButton.textContent='カメラカルテ撮影';chartButton.onclick=()=>chooseCameraChartType(stage);
-  const partButton=document.createElement('button');partButton.type='button';partButton.className='ghost camera-part-button';partButton.textContent='カメラ部位撮影';partButton.onclick=()=>capturePartPhoto(stage);
-  actions.append(chartButton,partButton);return actions;
+  const cameraButton=document.createElement('button');cameraButton.type='button';cameraButton.className='ghost camera-chart-button';cameraButton.textContent='カメラ';cameraButton.onclick=()=>captureChartPhoto(stage);
+  const fileButton=document.createElement('button');fileButton.type='button';fileButton.className='ghost camera-file-button';fileButton.textContent='ファイルを開く';fileButton.onclick=()=>openChartFiles(stage);
+  actions.append(cameraButton,fileButton);return actions;
 }
-function chooseCameraChartType(stage){
-  document.querySelector('.camera-type-dialog')?.remove();
-  const dialog=document.createElement('dialog');dialog.className='camera-type-dialog';dialog.innerHTML='<h3>撮影するカルテの種類</h3><p>入力欄を表示する種類を選んでください。</p>';
-  const choices=document.createElement('div');choices.className='camera-type-choices';
-  ['フット','フェイシャル','ボディ'].forEach(type=>{const button=document.createElement('button');button.type='button';button.className='primary';button.textContent=type;button.onclick=()=>{dialog.close();captureChartPhoto(type,stage)};choices.append(button)});
-  const cancel=document.createElement('button');cancel.type='button';cancel.className='ghost';cancel.textContent='キャンセル';cancel.onclick=()=>dialog.close();dialog.append(choices,cancel);dialog.onclose=()=>dialog.remove();document.body.append(dialog);dialog.showModal();
+function openChartFiles(stage){
+  const picker=document.createElement('input');picker.type='file';picker.accept='image/png,image/jpeg,image/webp';picker.multiple=stage==='new';picker.className='hidden';document.body.append(picker);
+  picker.onchange=async()=>{const files=[...picker.files].slice(0,stage==='new'?2:1);if(!files.length){picker.remove();return}try{const images=await Promise.all(files.map(optimizeImageFile));const result=await api('/api/ocr/validate-sheet',{method:'POST',body:JSON.stringify({images:[images[0]],expectedType:'',workflowStage:stage,captureKind:'chart'})});const chartGender=result.detectedType==='フット'?'common':normalizeChartGender(result.detectedGender);if(!result.valid||!['フット','フェイシャル','ボディ'].includes(result.detectedType)||!chartGender)throw new Error('カルテ種類または男性用・女性用を判定できませんでした');state.treatmentType=result.detectedType;state.chartGender=chartGender;state.workflowStage=stage;state.images=images;state.image=images[0];state.scan=null;showOcrFormForSelectedButton()}catch(error){toast(error.message)}finally{picker.remove()}};picker.click();
 }
 function cameraFilePicker(onImage){
   const picker=document.createElement('input');picker.type='file';picker.accept='image/*';picker.setAttribute('capture','environment');picker.className='hidden';document.body.append(picker);
-  picker.onchange=async()=>{const file=picker.files[0];if(!file){picker.remove();return}try{onImage(await optimizeImageFile(file))}catch(error){toast(error.message)}finally{picker.remove()}};picker.click();
+  picker.onchange=async()=>{const file=picker.files[0];if(!file){picker.remove();return}try{await onImage(await optimizeImageFile(file))}catch(error){toast(error.message)}finally{picker.remove()}};picker.click();
 }
-async function captureChartPhoto(type,stage){
+async function captureChartPhoto(stage){
   document.querySelector('.chart-camera-dialog')?.remove();
-  const requiredPages=stage==='new'?2:1,captured=[];
+  const requiredPages=stage==='new'?2:1,captured=[];let detectedType='',detectedGender='';
   const dialog=document.createElement('dialog');dialog.className='chart-camera-dialog';
-  const title=document.createElement('h3');title.textContent=`${type} カルテ撮影`;
+  const title=document.createElement('h3');title.textContent='カルテ撮影';
   const guide=document.createElement('p');guide.className='chart-camera-guide';
   const progress=document.createElement('div');progress.className='chart-camera-progress';
   const liveStatus=document.createElement('div');liveStatus.className='camera-live-status is-checking';liveStatus.textContent='カメラ準備後、AIがカルテ種類をライブ判定します';
@@ -98,38 +97,44 @@ async function captureChartPhoto(type,stage){
   const actions=document.createElement('div');actions.className='chart-camera-actions';
   const cancel=document.createElement('button');cancel.type='button';cancel.className='ghost';cancel.textContent='キャンセル';
   const switchCamera=document.createElement('button');switchCamera.type='button';switchCamera.className='ghost camera-switch';switchCamera.textContent='カメラ切替';
-  const shutter=document.createElement('button');shutter.type='button';shutter.className='primary camera-shutter';shutter.textContent='撮影';
+  const shutter=document.createElement('button');shutter.type='button';shutter.className='primary camera-shutter';shutter.textContent='種類を判定中';shutter.disabled=true;
   actions.append(cancel,switchCamera,shutter);dialog.append(title,guide,progress,liveStatus,videoWrap,actions);document.body.append(dialog);
   const updateGuide=()=>{guide.textContent=requiredPages===2?`${captured.length+1}枚目／2枚：${captured.length===0?'カウンセリングシート1ページ目':'同意・図示の2ページ目'}を撮影してください`:'途中経過シートをA4枠内に合わせて撮影してください';progress.innerHTML=Array.from({length:requiredPages},(_,index)=>`<span class="${index<captured.length?'done':index===captured.length?'current':''}">${index+1}枚目</span>`).join('')};
   let stream=null,facingMode='environment',liveTimer=null,liveChecking=false,liveRun=0;
   const stopLiveDetection=()=>{liveRun+=1;if(liveTimer)clearTimeout(liveTimer);liveTimer=null;liveChecking=false};
   const liveFrame=()=>{if(!video.videoWidth||!video.videoHeight)return '';const scale=Math.min(1,960/Math.max(video.videoWidth,video.videoHeight));const canvas=document.createElement('canvas');canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);canvas.getContext('2d',{alpha:false}).drawImage(video,0,0,canvas.width,canvas.height);return canvas.toDataURL('image/jpeg',.62)};
   const scheduleLiveDetection=(run,delay=2800)=>{if(run!==liveRun||!dialog.open)return;liveTimer=setTimeout(()=>detectLiveSheet(run),delay)};
-  const detectLiveSheet=async run=>{if(run!==liveRun||liveChecking||!dialog.open)return;const image=liveFrame();if(!image){scheduleLiveDetection(run,700);return}liveChecking=true;liveStatus.className='camera-live-status is-checking';liveStatus.textContent='AIがカルテ種類を判定中…';try{const result=await api('/api/ocr/validate-sheet',{method:'POST',body:JSON.stringify({images:[image],expectedType:type,workflowStage:stage})});if(run!==liveRun||!dialog.open)return;if(result.valid){liveStatus.className='camera-live-status is-valid';liveStatus.textContent=`✓ ${type}の${stage==='progress'?'途中経過':'新規登録'}シートを確認しました。撮影できます`;return}const detected=[result.detectedType,result.detectedStage].filter(value=>value&&value!=='不明').join('・')||'判定できません';liveStatus.className='camera-live-status is-warning';liveStatus.textContent=`⚠ 検出：${detected}。${type}のシートを枠内に合わせてください`}catch(error){if(run!==liveRun||!dialog.open)return;liveStatus.className='camera-live-status is-warning';liveStatus.textContent='AI判定を再試行します。シートを枠内で静止させてください'}finally{liveChecking=false;if(run===liveRun&&dialog.open&&!liveStatus.classList.contains('is-valid'))scheduleLiveDetection(run)}};
-  const startLiveDetection=()=>{stopLiveDetection();liveStatus.className='camera-live-status is-checking';liveStatus.textContent='シートを枠内に合わせてください。まもなく判定します';const run=liveRun;scheduleLiveDetection(run,700)};
+  const detectLiveSheet=async run=>{if(run!==liveRun||liveChecking||!dialog.open)return;const image=liveFrame();if(!image){scheduleLiveDetection(run,700);return}liveChecking=true;liveStatus.className='camera-live-status is-checking';liveStatus.textContent='AIがカルテ種類・男性用／女性用を判定中…';try{const result=await api('/api/ocr/validate-sheet',{method:'POST',body:JSON.stringify({images:[image],expectedType:detectedType,expectedGender:detectedGender,workflowStage:stage,captureKind:'chart'})});if(run!==liveRun||!dialog.open)return;const chartGender=result.detectedType==='フット'?'common':normalizeChartGender(result.detectedGender);if(result.valid&&['フット','フェイシャル','ボディ'].includes(result.detectedType)&&chartGender){detectedType=result.detectedType;detectedGender=chartGender;title.textContent=`${genderLabel(detectedGender)} ${detectedType} カルテ撮影`;shutter.disabled=false;shutter.textContent=captured.length?'2枚目を撮影':'撮影';liveStatus.className='camera-live-status is-valid';liveStatus.textContent=`✓ ${genderLabel(detectedGender)}・${detectedType}・${stage==='progress'?'途中経過':'新規登録'}を確認しました。撮影できます`;return}const detected=[result.detectedCaptureKind,result.detectedType,result.detectedGender,result.detectedStage].filter(value=>value&&value!=='不明').join('・')||'判定できません';liveStatus.className='camera-live-status is-warning';liveStatus.textContent=`⚠ 検出：${detected}。カルテ全体を枠内に合わせてください`}catch(error){if(run!==liveRun||!dialog.open)return;liveStatus.className='camera-live-status is-warning';liveStatus.textContent='AI判定を再試行します。シートを枠内で静止させてください'}finally{liveChecking=false;if(run===liveRun&&dialog.open&&!liveStatus.classList.contains('is-valid'))scheduleLiveDetection(run)}};
+  const startLiveDetection=()=>{stopLiveDetection();shutter.disabled=true;shutter.textContent='種類を判定中';liveStatus.className='camera-live-status is-checking';liveStatus.textContent='シートを枠内に合わせてください。まもなく判定します';const run=liveRun;scheduleLiveDetection(run,700)};
   const stopCamera=()=>{stopLiveDetection();stream?.getTracks().forEach(track=>track.stop());stream=null};
   const startCamera=async()=>{stopCamera();try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facingMode},width:{ideal:1920},height:{ideal:1080}},audio:false})}catch{stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false})}video.srcObject=stream;await video.play();startLiveDetection()};
   cancel.onclick=()=>dialog.close();dialog.onclose=()=>{stopCamera();dialog.remove()};updateGuide();dialog.showModal();
   switchCamera.onclick=async()=>{facingMode=facingMode==='environment'?'user':'environment';switchCamera.disabled=true;try{await startCamera()}catch{toast('別のカメラへ切り替えられませんでした')}finally{switchCamera.disabled=false}};
   try{if(!navigator.mediaDevices?.getUserMedia)throw new Error('camera unavailable');await startCamera()}
-  catch(error){dialog.close();toast('カメラを起動できないため、画像ファイル選択へ切り替えます');cameraFilePicker(image=>{state.treatmentType=type;state.workflowStage=stage;state.images=[image];state.image=image;state.scan=null;showOcrFormForSelectedButton()});return}
-  shutter.onclick=()=>{if(!video.videoWidth||!video.videoHeight){toast('カメラの準備中です');return}const scale=Math.min(1,2000/Math.max(video.videoWidth,video.videoHeight));const canvas=document.createElement('canvas');canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);canvas.getContext('2d',{alpha:false}).drawImage(video,0,0,canvas.width,canvas.height);captured.push(canvas.toDataURL('image/jpeg',.82));if(captured.length<requiredPages){updateGuide();shutter.textContent='2枚目を撮影';startLiveDetection();return}state.treatmentType=type;state.workflowStage=stage;state.images=captured;state.image=captured[0];state.scan=null;dialog.close();showOcrFormForSelectedButton()};
+  catch(error){dialog.close();toast('カメラを起動できないため、画像ファイル選択へ切り替えます');openChartFiles(stage);return}
+  shutter.onclick=()=>{if(!detectedType||!detectedGender){toast('カルテ種類と男性用・女性用の判定を待ってください');return}if(!video.videoWidth||!video.videoHeight){toast('カメラの準備中です');return}const scale=Math.min(1,2000/Math.max(video.videoWidth,video.videoHeight));const canvas=document.createElement('canvas');canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);canvas.getContext('2d',{alpha:false}).drawImage(video,0,0,canvas.width,canvas.height);captured.push(canvas.toDataURL('image/jpeg',.82));if(captured.length<requiredPages){updateGuide();startLiveDetection();return}state.treatmentType=detectedType;state.chartGender=detectedGender;state.workflowStage=stage;state.images=captured;state.image=captured[0];state.scan=null;dialog.close();showOcrFormForSelectedButton()};
 }
 async function capturePartPhoto(stage){
   document.querySelector('.part-camera-dialog')?.remove();
   const dialog=document.createElement('dialog');dialog.className='chart-camera-dialog part-camera-dialog';
   const title=document.createElement('h3');title.textContent='施術部位を撮影';
   const guide=document.createElement('p');guide.className='chart-camera-guide';guide.textContent='記録する施術部位を画面中央に合わせて撮影してください';
+  const liveStatus=document.createElement('div');liveStatus.className='camera-live-status is-checking';liveStatus.textContent=`AIが部位写真かライブ判定します（${stage==='progress'?'途中経過':'新規登録'}用）`;
   const videoWrap=document.createElement('div');videoWrap.className='chart-camera-video-wrap part-camera-video-wrap';
   const video=document.createElement('video');video.autoplay=true;video.playsInline=true;video.muted=true;videoWrap.append(video);
   const actions=document.createElement('div');actions.className='chart-camera-actions';
   const cancel=document.createElement('button');cancel.type='button';cancel.className='ghost';cancel.textContent='キャンセル';
   const switchCamera=document.createElement('button');switchCamera.type='button';switchCamera.className='ghost camera-switch';switchCamera.textContent='カメラ切替';
   const shutter=document.createElement('button');shutter.type='button';shutter.className='primary camera-shutter';shutter.textContent='撮影';
-  actions.append(cancel,switchCamera,shutter);dialog.append(title,guide,videoWrap,actions);document.body.append(dialog);
-  let stream=null,facingMode='environment';
-  const stopCamera=()=>{stream?.getTracks().forEach(track=>track.stop());stream=null};
-  const startCamera=async()=>{stopCamera();try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facingMode},width:{ideal:1920},height:{ideal:1080}},audio:false})}catch{stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false})}video.srcObject=stream;await video.play()};
+  actions.append(cancel,switchCamera,shutter);dialog.append(title,guide,liveStatus,videoWrap,actions);document.body.append(dialog);
+  let stream=null,facingMode='environment',liveTimer=null,liveChecking=false,liveRun=0;
+  const stopLiveDetection=()=>{liveRun+=1;if(liveTimer)clearTimeout(liveTimer);liveTimer=null;liveChecking=false};
+  const liveFrame=()=>{if(!video.videoWidth||!video.videoHeight)return '';const scale=Math.min(1,960/Math.max(video.videoWidth,video.videoHeight));const canvas=document.createElement('canvas');canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);canvas.getContext('2d',{alpha:false}).drawImage(video,0,0,canvas.width,canvas.height);return canvas.toDataURL('image/jpeg',.62)};
+  const scheduleLiveDetection=(run,delay=2800)=>{if(run!==liveRun||!dialog.open)return;liveTimer=setTimeout(()=>detectLivePart(run),delay)};
+  const detectLivePart=async run=>{if(run!==liveRun||liveChecking||!dialog.open)return;const image=liveFrame();if(!image){scheduleLiveDetection(run,700);return}liveChecking=true;liveStatus.className='camera-live-status is-checking';liveStatus.textContent='AIがカルテ撮影か部位撮影か判定中…';try{const result=await api('/api/ocr/validate-sheet',{method:'POST',body:JSON.stringify({images:[image],expectedType:state.treatmentType,workflowStage:stage,captureKind:'part'})});if(run!==liveRun||!dialog.open)return;if(result.valid){liveStatus.className='camera-live-status is-valid';liveStatus.textContent=`✓ 部位写真を確認しました（${stage==='progress'?'途中経過':'新規登録'}用）。撮影できます`;return}const detected=[result.detectedCaptureKind,result.detectedType,result.detectedStage].filter(value=>value&&value!=='不明').join('・')||'判定できません';liveStatus.className='camera-live-status is-warning';liveStatus.textContent=`⚠ 検出：${detected}。施術部位を画面中央に合わせてください`}catch(error){if(run!==liveRun||!dialog.open)return;liveStatus.className='camera-live-status is-warning';liveStatus.textContent='AI判定を再試行します。施術部位を画面中央で静止させてください'}finally{liveChecking=false;if(run===liveRun&&dialog.open&&!liveStatus.classList.contains('is-valid'))scheduleLiveDetection(run)}};
+  const startLiveDetection=()=>{stopLiveDetection();liveStatus.className='camera-live-status is-checking';liveStatus.textContent=`施術部位を中央に合わせてください（${stage==='progress'?'途中経過':'新規登録'}用）`;const run=liveRun;scheduleLiveDetection(run,700)};
+  const stopCamera=()=>{stopLiveDetection();stream?.getTracks().forEach(track=>track.stop());stream=null};
+  const startCamera=async()=>{stopCamera();try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facingMode},width:{ideal:1920},height:{ideal:1080}},audio:false})}catch{stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false})}video.srcObject=stream;await video.play();startLiveDetection()};
   cancel.onclick=()=>dialog.close();dialog.onclose=()=>{stopCamera();dialog.remove()};
   switchCamera.onclick=async()=>{facingMode=facingMode==='environment'?'user':'environment';switchCamera.disabled=true;try{await startCamera()}catch{toast('別のカメラへ切り替えられませんでした')}finally{switchCamera.disabled=false}};
   shutter.onclick=()=>{if(!video.videoWidth||!video.videoHeight){toast('カメラの準備中です');return}const scale=Math.min(1,2000/Math.max(video.videoWidth,video.videoHeight));const canvas=document.createElement('canvas');canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);canvas.getContext('2d',{alpha:false}).drawImage(video,0,0,canvas.width,canvas.height);const image=canvas.toDataURL('image/jpeg',.82);state.partImages[stage]=image;dialog.close();showPartPhotoPreview(stage,image)};
@@ -166,10 +171,10 @@ async function validateDisplayedSheets(){
   const status=document.createElement('div');status.className='sheet-validation-status is-checking';status.textContent='AIがシート種類を確認しています…';
   const prompt=frame.querySelector('.missing-image-prompt');if(prompt)prompt.insertAdjacentElement('afterend',status);else frame.insertBefore(status,frame.children[1]||null);
   try{
-    const result=await api('/api/ocr/validate-sheet',{method:'POST',body:JSON.stringify({images,expectedType:state.treatmentType,workflowStage:state.workflowStage})});
+    const result=await api('/api/ocr/validate-sheet',{method:'POST',body:JSON.stringify({images,expectedType:state.treatmentType,expectedGender:state.chartGender,workflowStage:state.workflowStage})});
     if(token!==state.sheetValidationToken||!status.isConnected)return;
     status.classList.remove('is-checking');
-    if(result.valid){status.classList.add('is-valid');status.textContent=`✓ ${state.treatmentType}の${state.workflowStage==='progress'?'途中経過':'新規登録'}シートを確認しました`}
+    if(result.valid){status.classList.add('is-valid');status.textContent=`✓ ${genderLabel(state.chartGender)}・${state.treatmentType}の${state.workflowStage==='progress'?'途中経過':'新規登録'}シートを確認しました`}
     else{status.classList.add('is-warning');const warnings=(result.warnings||[]).filter(Boolean).join('／');status.textContent=`⚠ シートが違う可能性があります。検出: ${result.detectedType||'不明'}・${result.detectedStage||'不明'}${warnings?`（${warnings}）`:''}`;toast('選択したボタンと画像のシート種類が一致しない可能性があります')}
   }catch(error){if(token!==state.sheetValidationToken||!status.isConnected)return;status.classList.remove('is-checking');status.classList.add('is-warning');status.textContent=`⚠ シート種類を確認できませんでした: ${error.message}`}
 }
@@ -243,26 +248,26 @@ function showSelectedFacialImagePreview(){
   const hero=$('.hero'),images=state.images.length?state.images:[state.image].filter(Boolean);if(!hero||!images.length)return;
   $('.image-preview-frame')?.remove();
   const frame=document.createElement('section');frame.className='card image-preview-frame';
-  frame.innerHTML=`<div class="section-head"><h2>選択した画像・OCR記入欄</h2><div class="ocr-heading-actions"><span class="badge">フェイシャル ${images.length}枚</span><button type="button" class="primary" id="runFacialOcr">OCR</button></div></div><div class="image-ocr-layout"><div class="selected-image-preview"><figure><figcaption>1枚目</figcaption><img src="${images[0]}" alt="選択したフェイシャルカルテ画像 1枚目"></figure></div>${facialFieldsFirst()}</div>`;
+  frame.innerHTML=`<div class="section-head"><h2>選択した画像・OCR記入欄</h2><div class="ocr-heading-actions"><span class="badge">${genderLabel(state.chartGender)}・フェイシャル ${images.length}枚</span><button type="button" class="primary" id="runFacialOcr">OCR</button></div></div><div class="image-ocr-layout"><div class="selected-image-preview"><figure><figcaption>1枚目</figcaption><img src="${images[0]}" alt="選択したフェイシャルカルテ画像 1枚目"></figure></div>${facialFieldsFirst()}</div>`;
   if(images[1])frame.insertAdjacentHTML('beforeend',`<div class="image-ocr-layout second-page-layout"><div class="selected-image-preview"><figure><figcaption>2枚目</figcaption><img src="${images[1]}" alt="選択したフェイシャルカルテ画像 2枚目"></figure></div>${facialFieldsSecond()}</div>`);
   hero.insertAdjacentElement('afterend',frame);addOcrCloseButton(frame);$('#runFacialOcr').onclick=runSelectedFacialOcr;
 }
 async function runSelectedFacialOcr(){
   const button=$('#runFacialOcr'),frame=$('.image-preview-frame');if(!button||!frame)return;button.disabled=true;button.textContent='OCR中…';
-  try{const images=state.images.length?state.images:[state.image];const result=await api('/api/ocr/facial',{method:'POST',body:JSON.stringify({images})});['kana','customerNo','name','email','phone','address','birthDate','occupation','skinCondition','lifestyle','hairRemovalHistory','consentDate','consentName','treatmentConsentDate','treatmentConsentName','waxAreas','cosmetics','dailyCare'].forEach(key=>{const field=frame.querySelector(`[name="${key}"]`);if(field)field.value=result[key]||''});markOcrReady(frame);toast(`${images.length}枚のOCR結果を入力欄へ反映しました`)}catch(error){toast(error.message)}finally{button.disabled=false;button.textContent='OCR'}
+  try{const images=state.images.length?state.images:[state.image];const result=await api('/api/ocr/facial',{method:'POST',body:JSON.stringify({images,chartGender:state.chartGender})});['kana','customerNo','name','email','phone','address','birthDate','occupation','skinCondition','lifestyle','hairRemovalHistory','consentDate','consentName','treatmentConsentDate','treatmentConsentName','waxAreas','cosmetics','dailyCare'].forEach(key=>{const field=frame.querySelector(`[name="${key}"]`);if(field)field.value=result[key]||''});markOcrReady(frame);toast(`${genderLabel(state.chartGender)} ${images.length}枚のOCR結果を反映しました`)}catch(error){toast(error.message)}finally{button.disabled=false;button.textContent='OCR'}
 }
 function bodyFieldsFirst(){return `<form class="body-ocr-fields" autocomplete="off"><div class="ocr-field-grid"><label>フリガナ<input name="kana" placeholder="OCR結果"></label><label>No.<input name="customerNo" placeholder="OCR結果"></label><label>お名前<input name="name" placeholder="OCR結果"></label><label>メール<input name="email" type="email" placeholder="OCR結果"></label><label>TEL<input name="phone" placeholder="OCR結果"></label><label class="field-wide">ご住所<textarea name="address" rows="2" placeholder="OCR結果"></textarea></label><label>生年月日<input name="birthDate" placeholder="西暦 年 月 日"></label><label>ご職業<input name="occupation" placeholder="OCR結果"></label></div><section class="ocr-form-section"><h3>お肌の状態・お手入れ方法</h3><textarea name="skinCondition" rows="5" placeholder="乾燥肌、脂性肌、普通肌、ニキビ、赤み、汗やムレなど"></textarea></section><section class="ocr-form-section"><h3>生活習慣</h3><textarea name="lifestyle" rows="5" placeholder="紫外線、妊娠、アレルギー、スポーツ、通院、常用薬など"></textarea></section><section class="ocr-form-section"><h3>脱毛の経験</h3><textarea name="hairRemovalHistory" rows="5" placeholder="サロン脱毛、ワックス脱毛、自己処理、脱毛後の肌トラブル"></textarea></section><div class="ocr-field-grid consent-fields"><label>個人情報同意日<input name="consentDate" placeholder="西暦 年 月 日"></label><label>同意者氏名<input name="consentName" placeholder="OCR結果"></label></div></form>`}
 function bodyFieldsSecond(){return `<form class="body-ocr-fields second-page-fields" autocomplete="off"><div class="ocr-field-grid consent-fields"><label>施術同意日<input name="treatmentConsentDate" placeholder="西暦 年 月 日"></label><label>同意者氏名<input name="treatmentConsentName" placeholder="OCR結果"></label></div><section class="ocr-form-section"><h3>ワックス脱毛施術部位</h3><textarea name="bodyAreas" rows="6" placeholder="VIO、両ワキ、ひじ、背中、うなじ、お腹、ヒップ、脚、腕など"></textarea></section><section class="ocr-form-section"><h3>VIOデザイン</h3><textarea name="vioDesign" rows="3" placeholder="ナチュラル、トライアングル、オーバル、ハイジニーナなど"></textarea></section><section class="ocr-form-section"><h3>使用化粧品</h3><textarea name="cosmetics" rows="6" placeholder="プレワックスローション、ワックス、アフターローション、保湿ジェルなど"></textarea></section><section class="ocr-form-section"><h3>デイリーケア方法等</h3><textarea name="dailyCare" rows="7" placeholder="施術後の注意、保湿、スクラブ、次回施術時期など"></textarea></section></form>`}
 function showSelectedBodyImagePreview(){
   const hero=$('.hero'),images=state.images.length?state.images:[state.image].filter(Boolean);if(!hero||!images.length)return;
   $('.image-preview-frame')?.remove();const frame=document.createElement('section');frame.className='card image-preview-frame';
-  frame.innerHTML=`<div class="section-head"><h2>選択した画像・OCR記入欄</h2><div class="ocr-heading-actions"><span class="badge">ボディ ${images.length}枚</span><button type="button" class="primary" id="runBodyOcr">OCR</button></div></div><div class="image-ocr-layout"><div class="selected-image-preview"><figure><figcaption>1枚目</figcaption><img src="${images[0]}" alt="選択したボディカルテ画像 1枚目"></figure></div>${bodyFieldsFirst()}</div>`;
+  frame.innerHTML=`<div class="section-head"><h2>選択した画像・OCR記入欄</h2><div class="ocr-heading-actions"><span class="badge">${genderLabel(state.chartGender)}・ボディ ${images.length}枚</span><button type="button" class="primary" id="runBodyOcr">OCR</button></div></div><div class="image-ocr-layout"><div class="selected-image-preview"><figure><figcaption>1枚目</figcaption><img src="${images[0]}" alt="選択したボディカルテ画像 1枚目"></figure></div>${bodyFieldsFirst()}</div>`;
   if(images[1])frame.insertAdjacentHTML('beforeend',`<div class="image-ocr-layout second-page-layout"><div class="selected-image-preview"><figure><figcaption>2枚目</figcaption><img src="${images[1]}" alt="選択したボディカルテ画像 2枚目"></figure></div>${bodyFieldsSecond()}</div>`);
   hero.insertAdjacentElement('afterend',frame);addOcrCloseButton(frame);$('#runBodyOcr').onclick=runSelectedBodyOcr;
 }
 async function runSelectedBodyOcr(){
   const button=$('#runBodyOcr'),frame=$('.image-preview-frame');if(!button||!frame)return;button.disabled=true;button.textContent='OCR中…';
-  try{const images=state.images.length?state.images:[state.image];const result=await api('/api/ocr/body',{method:'POST',body:JSON.stringify({images})});['kana','customerNo','name','email','phone','address','birthDate','occupation','skinCondition','lifestyle','hairRemovalHistory','consentDate','consentName','treatmentConsentDate','treatmentConsentName','bodyAreas','vioDesign','cosmetics','dailyCare'].forEach(key=>{const field=frame.querySelector(`[name="${key}"]`);if(field)field.value=result[key]||''});markOcrReady(frame);toast(`${images.length}枚のOCR結果を入力欄へ反映しました`)}catch(error){toast(error.message)}finally{button.disabled=false;button.textContent='OCR'}
+  try{const images=state.images.length?state.images:[state.image];const result=await api('/api/ocr/body',{method:'POST',body:JSON.stringify({images,chartGender:state.chartGender})});['kana','customerNo','name','email','phone','address','birthDate','occupation','skinCondition','lifestyle','hairRemovalHistory','consentDate','consentName','treatmentConsentDate','treatmentConsentName','bodyAreas','vioDesign','cosmetics','dailyCare'].forEach(key=>{const field=frame.querySelector(`[name="${key}"]`);if(field)field.value=result[key]||''});markOcrReady(frame);toast(`${genderLabel(state.chartGender)} ${images.length}枚のOCR結果を反映しました`)}catch(error){toast(error.message)}finally{button.disabled=false;button.textContent='OCR'}
 }
 function showSelectedImagePreview(){
   const hero=$('.hero');
@@ -313,7 +318,7 @@ async function saveOcrRecord(frame,button){
     state.customers=await api('/api/customers');
     const normalizedPhone=(values.phone||'').replace(/\D/g,'');
     let customer=state.customers.find(item=>item.name===values.name&&(normalizedPhone?String(item.phone||'').replace(/\D/g,'')===normalizedPhone:true));
-    if(!customer)customer=await api('/api/customers',{method:'POST',body:JSON.stringify({name:values.name,phone:values.phone||''})});
+    if(!customer)customer=await api('/api/customers',{method:'POST',body:JSON.stringify({name:values.name,phone:values.phone||'',gender:['male','female'].includes(state.chartGender)?state.chartGender:''})});
     if(!state.templates.length)state.templates=await api('/api/templates');
     const template=state.templates[0];
     if(!template)throw new Error('保存用テンプレートがありません');
@@ -321,7 +326,7 @@ async function saveOcrRecord(frame,button){
     values.treatment=treatmentLabel;
     const images=imagesForRecord();
     const visitDate=todayDateValue();
-    await api('/api/records',{method:'POST',body:JSON.stringify({customerId:customer.id,visitDate,templateId:template.id,values,alerts:[],note:`${treatmentLabel} OCRから保存`,images})});
+    await api('/api/records',{method:'POST',body:JSON.stringify({customerId:customer.id,visitDate,templateId:template.id,chartGender:state.chartGender,values,alerts:[],note:`${genderLabel(state.chartGender)} ${treatmentLabel} OCRから保存`,images})});
     state.partImages[state.workflowStage]='';
     button.textContent='保存済み';toast('カルテ画像・部位写真・OCR結果を保存しました');
   }catch(error){button.disabled=false;button.textContent='保存';toast(error.message)}
@@ -338,19 +343,13 @@ function enhanceCurrentView(name){
   if(recentHeading){recentHeading.textContent='お客様履歴';setupDashboardPatientSearch(recentHeading.closest('.section-head'))}
   const hero=$('.hero');
   const heading=$('.hero h2');
-  if(heading)heading.textContent='新規登録';
+  if(heading)heading.textContent='カルテOCR';
   const description=$('.hero p');
   if(description)description.remove();
   const readButton=$('.hero>.primary');
-  if(readButton)readButton.replaceWith(createTreatmentActions('new'));
+  if(readButton)readButton.remove();
   if(hero){
     hero.append(createCameraActions('new'));
-    const progressFrame=document.createElement('section');
-    progressFrame.className='hero progress-frame';
-    progressFrame.innerHTML='<h2>途中経過</h2>';
-    progressFrame.append(createTreatmentActions('progress'));
-    progressFrame.append(createCameraActions('progress'));
-    hero.insertAdjacentElement('afterend',progressFrame);
     if(state.image||state.images.length)showOcrFormForSelectedButton();
   }
 }
@@ -472,7 +471,12 @@ async function renderAdminCustomers(){
   };
 }
 async function renderDashboard(){const d=await api('/api/dashboard');$('#content').innerHTML=`<section class="home-identity"><div><small>契約会社名</small><b>${esc(state.user.tenant.companyName||'未登録')}</b></div><div><small>店舗名</small><b>${esc(state.user.tenant.name)}</b></div></section><section class="hero"><div><h2>${new Date().getHours()<12?'おはようございます':'お疲れさまです'}、${esc(state.user.name.split(' ')[0])}さん</h2><p>お客様の大切な情報を、今日の施術に活かしましょう。</p></div><button class="primary" onclick="show('scan')">＋ カルテを読み取る</button></section><div class="stats"><div class="card stat"><div><small>登録お客様</small><b>${d.customers}</b> 人</div><i>♙</i></div><div class="card stat"><div><small>今月のカルテ</small><b>${d.recordsThisMonth}</b> 件</div><i>▤</i></div><div class="card stat"><div><small>注意事項あり</small><b>${d.alerts}</b> 人</div><i>!</i></div></div><div class="section-head"><h2>最近の施術記録</h2><button class="link-btn" onclick="show('customers')">すべて見る →</button></div><div class="card">${d.recent.length?d.recent.map(r=>`<div class="record-row"><div class="date-box"><b>${r.visitDate.slice(8)}</b>${Number(r.visitDate.slice(5,7))}月</div><div><b>${esc(r.customer?.name)}</b><small class="muted">${esc(r.staff)} 担当</small></div><div>${esc(r.values.treatment||'施術記録')}</div><div>${r.alerts?.length?'<span class="badge alert">! 注意事項あり</span>':'<span class="badge">確認済み</span>'}</div><button class="ghost" onclick="openCustomer('${r.customerId}')">詳細</button></div>`).join(''):'<div class="empty">まだ記録がありません</div>'}</div>`}
-async function renderCustomers(){state.customers=await api('/api/customers');$('#content').innerHTML=`<div class="searchbar"><input id="customerSearch" placeholder="お名前・電話番号で検索"></div><div class="card" id="customerList"></div>`;const draw=()=>{const q=$('#customerSearch').value.toLowerCase();const rows=state.customers.filter(c=>(c.name+c.kana+c.phone).toLowerCase().includes(q));$('#customerList').innerHTML=rows.map(c=>`<div class="customer-row"><div class="avatar">${esc(c.name[0])}</div><div><b>${esc(c.name)}</b><small class="muted">${esc(c.kana)}</small></div><div>${esc(c.phone)}</div><div>${c.alerts.length?`<span class="badge alert">! ${esc(c.alerts[0])}</span>`:'<span class="badge">注意事項なし</span>'}</div><button class="ghost" onclick="openCustomer('${c.id}')">履歴を見る</button></div>`).join('')||'<div class="empty">該当するお客様はいません</div>'};draw();$('#customerSearch').oninput=draw}
+async function renderCustomers(){
+  state.customers=await api('/api/customers');
+  $('#content').innerHTML=`<div class="searchbar"><input id="customerSearch" placeholder="お名前・電話番号で検索"><select id="customerGenderFilter" aria-label="性別で絞り込み"><option value="">すべて</option><option value="male">男性</option><option value="female">女性</option><option value="unset">未設定</option></select></div><div class="card" id="customerList"></div>`;
+  const draw=()=>{const q=$('#customerSearch').value.toLowerCase(),gender=$('#customerGenderFilter').value;const rows=state.customers.filter(c=>(c.name+c.kana+c.phone).toLowerCase().includes(q)&&(!gender||(gender==='unset'?!c.gender:c.gender===gender)));$('#customerList').innerHTML=rows.map(c=>`<div class="customer-row"><div class="avatar">${esc(c.name[0])}</div><div><b>${esc(c.name)}</b><small class="muted">${esc(c.kana)}</small></div><div>${esc(c.phone)}</div><div><span class="badge gender-badge ${esc(c.gender||'unset')}">${esc(genderLabel(c.gender))}</span> ${c.alerts.length?`<span class="badge alert">! ${esc(c.alerts[0])}</span>`:'<span class="badge">注意事項なし</span>'}</div><button class="ghost" onclick="openCustomer('${c.id}')">履歴を見る</button></div>`).join('')||'<div class="empty">該当するお客様はいません</div>'};
+  draw();$('#customerSearch').oninput=draw;$('#customerGenderFilter').onchange=draw;
+}
 async function addCustomer(){const name=prompt('お客様のお名前を入力してください');if(!name)return;const phone=prompt('電話番号（任意）')||'';const customer=await api('/api/customers',{method:'POST',body:JSON.stringify({name,phone})});toast(customer.billing?.tier==='paid'?`お客様を登録しました（有料対象 ${customer.billing.paidCustomers}名）`:`お客様を登録しました（無料枠 ${customer.billing?.companyCustomers||0}/30名）`);renderCustomers()}
 async function openCustomer(id){
   const d=await api(`/api/customers/${id}`),c=d.customer;
@@ -484,9 +488,10 @@ async function openCustomer(id){
     ['電話番号',first.phone||c.phone],['住所',first.address],['生年月日',first.birthDate],['職業',first.occupation]
   ];
   $('#pageTitle').textContent='お客様カルテ';$('#pageSub').textContent='施術前に注意事項を確認してください';
-  $('#content').innerHTML=`<button type="button" class="ghost" id="backToCustomers">← 一覧に戻る</button><div class="detail-grid" style="margin-top:18px"><section class="card profile"><div class="avatar">${esc(c.name[0])}</div><h2>${esc(c.name)}</h2><p class="muted">${esc(c.kana)}<br>${esc(c.phone)}</p><div class="alert-box"><b>⚠ 施術前注意事項</b>${c.alerts.length?`<ul>${c.alerts.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:'<p>登録なし</p>'}</div><h3>お好み・ご希望</h3><ul>${c.preferences.map(x=>`<li>${esc(x)}</li>`).join('')||'<li>登録なし</li>'}</ul><p class="muted last-visit">最終来店：${fmt(c.lastVisit)}</p><section class="customer-basic-info"><h3>初回登録情報</h3>${basicInfo.map(([label,value])=>`<div><small>${esc(label)}</small><span>${esc(value||'未登録')}</span></div>`).join('')}</section></section><section><div class="section-head"><h2>施術タイムライン</h2></div><div class="timeline">${d.records.map(r=>`<article class="card"><div class="field-head"><b>${fmt(r.visitDate)}</b><span class="badge">${esc(r.staff)}</span></div>${r.alerts.length?`<div class="alert-box"><b>注意</b> ${r.alerts.map(esc).join(' ／ ')}</div>`:''}<h3>${esc(r.values.treatment||'施術記録')}</h3><p>${esc(r.note||r.values.concern||'')}</p><small class="muted">${Object.entries(r.values).filter(([k])=>!['treatment','concern'].includes(k)).map(([,v])=>v).filter(Boolean).map(esc).join(' ・ ')}</small></article>`).join('')||'<div class="empty">施術履歴はありません</div>'}</div></section></div>`;
+  $('#content').innerHTML=`<button type="button" class="ghost" id="backToCustomers">← 一覧に戻る</button><div class="detail-grid" style="margin-top:18px"><section class="card profile"><div class="avatar">${esc(c.name[0])}</div><h2>${esc(c.name)}</h2><p class="muted">${esc(c.kana)}<br>${esc(c.phone)}</p><div class="customer-gender-control"><label>カルテ運用区分<select id="customerGender" ${d.canEdit?'':'disabled'}><option value="" ${!c.gender?'selected':''}>未設定</option><option value="male" ${c.gender==='male'?'selected':''}>男性用</option><option value="female" ${c.gender==='female'?'selected':''}>女性用</option></select></label></div><div class="alert-box"><b>⚠ 施術前注意事項</b>${c.alerts.length?`<ul>${c.alerts.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:'<p>登録なし</p>'}</div><h3>お好み・ご希望</h3><ul>${c.preferences.map(x=>`<li>${esc(x)}</li>`).join('')||'<li>登録なし</li>'}</ul><p class="muted last-visit">最終来店：${fmt(c.lastVisit)}</p><section class="customer-basic-info"><h3>初回登録情報</h3>${basicInfo.map(([label,value])=>`<div><small>${esc(label)}</small><span>${esc(value||'未登録')}</span></div>`).join('')}</section></section><section><div class="section-head"><h2>施術タイムライン</h2></div><div class="timeline">${d.records.map(r=>`<article class="card"><div class="field-head"><b>${fmt(r.visitDate)}</b><span><span class="badge gender-badge ${esc(r.chartGender||'unset')}">${esc(genderLabel(r.chartGender))}</span> <span class="badge">${esc(r.staff)}</span></span></div>${r.alerts.length?`<div class="alert-box"><b>注意</b> ${r.alerts.map(esc).join(' ／ ')}</div>`:''}<h3>${esc(r.values.treatment||'施術記録')}</h3><p>${esc(r.note||r.values.concern||'')}</p><small class="muted">${Object.entries(r.values).filter(([k])=>!['treatment','concern'].includes(k)).map(([,v])=>v).filter(Boolean).map(esc).join(' ・ ')}</small></article>`).join('')||'<div class="empty">施術履歴はありません</div>'}</div></section></div>`;
   const profileContact=$('.profile > p.muted');
   if(profileContact&&d.sourceStore){const storeLabel=document.createElement('p');storeLabel.className=`customer-source-store${d.canEdit?'':' read-only'}`;storeLabel.textContent=`登録店舗：${d.sourceStore}${d.canEdit?'':'（閲覧のみ）'}`;profileContact.insertAdjacentElement('afterend',storeLabel)}
+  const genderSelect=$('#customerGender');if(genderSelect&&d.canEdit)genderSelect.onchange=async()=>{genderSelect.disabled=true;try{await api(`/api/customers/${id}`,{method:'PUT',body:JSON.stringify({gender:genderSelect.value})});toast('カルテ運用区分を保存しました');await openCustomer(id)}catch(error){toast(error.message);genderSelect.disabled=false}};
   const preferenceTitle=[...$$('.profile > h3')].find(element=>element.textContent==='お好み・ご希望');
   const preferenceList=preferenceTitle?.nextElementSibling;
   const preferenceBox=document.createElement('div');preferenceBox.className='preference-box';

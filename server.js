@@ -87,14 +87,17 @@ function recordLoginFailure(ip) { loginAttempts.set(ip, [...(loginAttempts.get(i
 function outputText(result) { return result.output_text || (result.output || []).flatMap(x => x.content || []).find(x => x.type === 'output_text')?.text || ''; }
 function parseModelJson(text) { const cleaned = text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim(); return JSON.parse(cleaned); }
 
-async function validateOcrSheets(images, expectedType, workflowStage) {
+async function validateOcrSheets(images, expectedType, workflowStage, expectedCaptureKind = 'chart', expectedGender = '') {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw Object.assign(new Error('OPENAI_API_KEY が設定されていません。'), { status: 503 });
   images = (Array.isArray(images) ? images : [images]).filter(Boolean).slice(0, 2);
   if (!images.length || images.some(image => !/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(image))) throw Object.assign(new Error('確認する画像を選択してください。'), { status: 400 });
-  if (!['フット', 'フェイシャル', 'ボディ'].includes(expectedType) || !['new', 'progress'].includes(workflowStage)) throw Object.assign(new Error('確認するシート種別が不正です。'), { status: 400 });
+  if (!['chart', 'part'].includes(expectedCaptureKind) || !['new', 'progress'].includes(workflowStage) || (expectedCaptureKind === 'chart' && expectedType && !['フット', 'フェイシャル', 'ボディ'].includes(expectedType))) throw Object.assign(new Error('確認する撮影種別が不正です。'), { status: 400 });
   const expectedStage = workflowStage === 'progress' ? '途中経過' : '新規登録';
-  const prompt = `サロンカルテ画像の種類だけを判定してください。期待値は「${expectedType}」の「${expectedStage}」シートです。\n新規登録シートは通常2ページ構成、途中経過シートは通常1ページ構成です。画像内のタイトル、Foot/Facial/Body、人体図・足図・顔図、初診・途中経過のレイアウトを確認してください。文字のOCR結果は不要です。\nJSON以外は出力しません。\n出力形式: {"valid":trueまたはfalse,"detectedType":"フット|フェイシャル|ボディ|不明","detectedStage":"新規登録|途中経過|不明","pages":["各画像で判定したページや特徴"],"warnings":["不一致理由。問題なければ空配列"]}`;
+  const genderLabel = expectedGender === 'male' ? '男性用' : expectedGender === 'female' ? '女性用' : '';
+  const expectedDescription = expectedCaptureKind === 'part' ? `「${expectedStage}」工程で保存する施術部位の写真` : expectedType ? `「${expectedType}」の「${expectedStage}」${genderLabel ? `「${genderLabel}」` : ''}カルテ` : `種類と男性用・女性用を自動判定する「${expectedStage}」カルテ`;
+  const validRule = expectedCaptureKind === 'part' ? '人体・顔・手足などの施術部位が中心の写真ならvalid=trueにしてください。部位写真だけでは新規登録と途中経過を区別できないため、detectedStageが不明でもvalid=trueで構いません。紙のカルテ、書類、無関係な物ならfalseです。' : expectedType ? `紙のカルテで、種類が「${expectedType}」、工程が「${expectedStage}」${genderLabel ? `、性別版が「${genderLabel}」` : ''}と一致する場合だけvalid=trueにしてください。` : `紙のカルテで、工程が「${expectedStage}」と一致し、種類をフット・フェイシャル・ボディのいずれかに判定できる場合だけvalid=trueにしてください。フェイシャルとボディは男性用・女性用も判定し、フットは男女共通としてください。`;
+  const prompt = `カメラ映像が期待する撮影対象か判定してください。期待値は${expectedDescription}です。\n撮影対象を「カルテ」または「部位写真」に分類してください。カルテの場合、新規登録シートは通常2ページ構成、途中経過シートは通常1ページ構成です。タイトル、Male、男性、女性、Foot/Facial/Body、人体図・足図・顔図、初診・途中経過のレイアウトを確認してください。${validRule}\n文字のOCR結果は不要です。JSON以外は出力しません。\n出力形式: {"valid":trueまたはfalse,"detectedCaptureKind":"カルテ|部位写真|不明","detectedType":"フット|フェイシャル|ボディ|不明","detectedGender":"男性用|女性用|男女共通|不明","detectedStage":"新規登録|途中経過|不明","pages":["各画像で判定した特徴"],"warnings":["不一致理由。問題なければ空配列"]}`;
   const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5.6', store: false, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, ...images.map(image => ({ type: 'input_image', image_url: image, detail: 'low' }))] }] }) });
   const raw = await response.text();let result;try { result = JSON.parse(raw); } catch { result = null; }
   if (!response.ok) throw Object.assign(new Error(result?.error?.message || `シート確認に失敗しました（HTTP ${response.status}）`), { status: response.status });
@@ -134,12 +137,12 @@ async function runFootOcr(images) {
   return parseModelJson(outputText(result));
 }
 
-async function runFacialOcr(images) {
+async function runFacialOcr(images, chartGender = '') {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw Object.assign(new Error('OPENAI_API_KEY が設定されていません。'), { status: 503 });
   images = (Array.isArray(images) ? images : [images]).filter(Boolean).slice(0, 2);
   if (!images.length || images.some(image => !/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(image))) throw Object.assign(new Error('PNG・JPEG・WEBP・GIF画像を1〜2枚選択してください。'), { status: 400 });
-  const prompt = `フェイシャルワックスのカウンセリングシート画像を正確に読み取ってください。チェック済みの選択肢は項目名を列挙し、自由記載と合わせて読みやすい日本語の文字列にします。図の赤い斜線部分は施術部位として読み取ります。推測できない値は空文字にし、JSON以外は出力しません。
+  const prompt = `${chartGender === 'male' ? '男性用' : chartGender === 'female' ? '女性用' : ''}フェイシャルワックスのカウンセリングシート画像を正確に読み取ってください。チェック済みの選択肢は項目名を列挙し、自由記載と合わせて読みやすい日本語の文字列にします。図の赤い斜線部分は施術部位として読み取ります。推測できない値は空文字にし、JSON以外は出力しません。
 出力形式:
 {"kana":"フリガナ","customerNo":"No.","name":"氏名","email":"メール","phone":"TEL","address":"住所","birthDate":"生年月日","occupation":"職業","skinCondition":"1枚目のお肌の状態、お手入れ方法、赤み、化粧品トラブル、その他","lifestyle":"1枚目の生活習慣、病気、薬、ピーリング等","hairRemovalHistory":"1枚目の脱毛経験、方法、部位、自己処理、肌トラブル","consentDate":"1枚目の個人情報保護方針同意日","consentName":"1枚目の同意者氏名","treatmentConsentDate":"2枚目の施術同意日","treatmentConsentName":"2枚目の同意者氏名","waxAreas":"2枚目の図示されたワックス脱毛施術部位","cosmetics":"2枚目の使用化粧品","dailyCare":"2枚目の朝夜のデイリーケア方法等"}`;
   const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5.6', store: false, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, ...images.map(image => ({ type: 'input_image', image_url: image, detail: 'original' }))] }] }) });
@@ -149,12 +152,12 @@ async function runFacialOcr(images) {
   return parseModelJson(outputText(result));
 }
 
-async function runBodyOcr(images) {
+async function runBodyOcr(images, chartGender = '') {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw Object.assign(new Error('OPENAI_API_KEY が設定されていません。'), { status: 503 });
   images = (Array.isArray(images) ? images : [images]).filter(Boolean).slice(0, 2);
   if (!images.length || images.some(image => !/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(image))) throw Object.assign(new Error('PNG・JPEG・WEBP・GIF画像を1〜2枚選択してください。'), { status: 400 });
-  const prompt = `ボディワックスのカウンセリングシート画像を正確に読み取ってください。チェック済みの選択肢は項目名を列挙し、自由記載と合わせて読みやすい日本語の文字列にします。人体図の色付き部分は施術部位として読み取り、VIOデザインも判別します。推測できない値は空文字にし、JSON以外は出力しません。
+  const prompt = `${chartGender === 'male' ? '男性用' : chartGender === 'female' ? '女性用' : ''}ボディワックスのカウンセリングシート画像を正確に読み取ってください。チェック済みの選択肢は項目名を列挙し、自由記載と合わせて読みやすい日本語の文字列にします。男性用・女性用それぞれの人体図の色付き部分は施術部位として読み取り、VIOデザインも判別します。推測できない値は空文字にし、JSON以外は出力しません。
 出力形式:
 {"kana":"フリガナ","customerNo":"No.","name":"氏名","email":"メール","phone":"TEL","address":"住所","birthDate":"生年月日","occupation":"職業","skinCondition":"1枚目のお肌の状態、お手入れ方法、赤み、汗やムレ、その他","lifestyle":"1枚目の生活習慣、病気、薬等","hairRemovalHistory":"1枚目の脱毛経験、方法、部位、自己処理、肌トラブル","consentDate":"1枚目の個人情報保護方針同意日","consentName":"1枚目の同意者氏名","treatmentConsentDate":"2枚目の施術同意日","treatmentConsentName":"2枚目の同意者氏名","bodyAreas":"2枚目の人体図と記載から読み取った施術部位","vioDesign":"2枚目のVIOデザイン","cosmetics":"2枚目の使用化粧品","dailyCare":"2枚目の施術後注意とデイリーケア方法等"}`;
   const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5.6', store: false, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, ...images.map(image => ({ type: 'input_image', image_url: image, detail: 'original' }))] }] }) });
@@ -414,7 +417,8 @@ async function api(req, res, pathname) {
     const companyTenantIds = db.tenants.filter(row => tenant?.companyName ? row.companyName === tenant.companyName : row.id === user.tenantId).map(row => row.id);
     const currentCompanyCustomers = db.customers.filter(row => companyTenantIds.includes(row.tenantId)).length;
     const billingTier = currentCompanyCustomers >= FREE_CUSTOMERS_PER_COMPANY ? 'paid' : 'free';
-    const row = { id: id('c'), tenantId: user.tenantId, name: b.name, kana: b.kana || '', phone: b.phone || '', lastVisit: '', alerts: b.alerts || [], preferences: b.preferences || [], billingTier };
+    const gender = ['male', 'female'].includes(b.gender) ? b.gender : '';
+    const row = { id: id('c'), tenantId: user.tenantId, name: b.name, kana: b.kana || '', phone: b.phone || '', gender, lastVisit: '', alerts: b.alerts || [], preferences: b.preferences || [], billingTier };
     db.customers.push(row);
     await save();
     return json(res, 201, { ...row, billing: { tier: billingTier, companyCustomers: currentCompanyCustomers + 1, freeLimit: FREE_CUSTOMERS_PER_COMPANY, paidCustomers: Math.max(0, currentCompanyCustomers + 1 - FREE_CUSTOMERS_PER_COMPANY) } });
@@ -425,9 +429,10 @@ async function api(req, res, pathname) {
     const customer = tenantRows('customers', user).find(x => x.id === cm[1]);
     if (!customer) return json(res, 404, { error: 'お客様が見つかりません' });
     const b = await body(req);
-    if (!Array.isArray(b.alerts) && !Array.isArray(b.preferences)) return json(res, 400, { error: '更新内容を正しく入力してください' });
+    if (!Array.isArray(b.alerts) && !Array.isArray(b.preferences) && b.gender === undefined) return json(res, 400, { error: '更新内容を正しく入力してください' });
     if (Array.isArray(b.alerts)) customer.alerts = [...new Set(b.alerts.map(value => String(value).trim()).filter(Boolean))].slice(0, 50);
     if (Array.isArray(b.preferences)) customer.preferences = [...new Set(b.preferences.map(value => String(value).trim()).filter(Boolean))].slice(0, 50);
+    if (b.gender !== undefined) { if (!['male', 'female', ''].includes(b.gender)) return json(res, 400, { error: '性別区分が不正です' }); customer.gender = b.gender; }
     await save();
     return json(res, 200, customer);
   }
@@ -436,12 +441,12 @@ async function api(req, res, pathname) {
   const tm = pathname.match(/^\/api\/templates\/([^/]+)$/);
   if (tm && req.method === 'PUT') { if (user.role !== 'owner') return json(res, 403, { error: 'オーナー権限が必要です' }); const row = tenantRows('templates', user).find(x => x.id === tm[1]); if (!row) return json(res, 404, { error: 'テンプレートが見つかりません' }); Object.assign(row, await body(req), { id: row.id, tenantId: row.tenantId, updatedAt: new Date().toISOString().slice(0,10) }); await save(); return json(res, 200, row); }
   if (pathname === '/api/ocr/foot' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runFootOcr(b.images || b.image)); }
-  if (pathname === '/api/ocr/facial' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runFacialOcr(b.images || b.image)); }
-  if (pathname === '/api/ocr/body' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runBodyOcr(b.images || b.image)); }
+  if (pathname === '/api/ocr/facial' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runFacialOcr(b.images || b.image, b.chartGender)); }
+  if (pathname === '/api/ocr/body' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runBodyOcr(b.images || b.image, b.chartGender)); }
   if (pathname === '/api/ocr/facial-progress' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runProgressFacialOcr(b.image)); }
   if (pathname === '/api/ocr/foot-progress' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runProgressFootOcr(b.image)); }
   if (pathname === '/api/ocr/body-progress' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runProgressBodyOcr(b.image)); }
-  if (pathname === '/api/ocr/validate-sheet' && req.method === 'POST') { const b = await body(req); return json(res, 200, await validateOcrSheets(b.images, b.expectedType, b.workflowStage)); }
+  if (pathname === '/api/ocr/validate-sheet' && req.method === 'POST') { const b = await body(req); return json(res, 200, await validateOcrSheets(b.images, b.expectedType, b.workflowStage, b.captureKind || 'chart', b.expectedGender)); }
   if (pathname === '/api/ocr' && req.method === 'POST') { const b = await body(req); const template = tenantRows('templates', user).find(x => x.id === b.templateId); if (!template) return json(res, 404, { error: 'テンプレートが見つかりません' }); return json(res, 200, await runOcr(b.image, template)); }
   if (pathname === '/api/ocr/demo' && req.method === 'POST') return json(res, 200, { customerName: '山田 花子', visitDate: new Date().toISOString().slice(0,10), values: { name: '山田 花子', visitDate: new Date().toISOString().slice(0,10), concern: '頬の乾燥、夕方のくすみが気になる', allergy: 'ラテックスアレルギーあり', redness: 'アルコール配合化粧水で赤みが出やすい', treatment: '保湿フェイシャル 60分', preference: '香りのない製品、マッサージは弱め希望' }, confidence: { name: .98, visitDate: .96, concern: .87, allergy: .93, redness: .84, treatment: .91, preference: .86 }, alerts: ['ラテックスアレルギー', 'アルコール成分で赤みが出やすい'] });
   if (pathname === '/api/records' && req.method === 'GET') {
@@ -455,7 +460,7 @@ async function api(req, res, pathname) {
       .sort((a, b) => String(b.visitDate || '').localeCompare(String(a.visitDate || '')));
     return json(res, 200, records);
   }
-  if (pathname === '/api/records' && req.method === 'POST') { const b = await body(req); const customer = tenantRows('customers', user).find(c => c.id === b.customerId); if (!customer) return json(res, 400, { error: '顧客を選択してください' }); const images = (Array.isArray(b.images) ? b.images : [b.image]).filter(image => /^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(String(image || ''))).slice(0, 3); if (images.some(image => image.length > 4_000_000)) return json(res, 413, { error: '1枚あたりの画像容量が大きすぎます。撮影または選択し直してください' }); const row = { id: id('r'), tenantId: user.tenantId, customerId: customer.id, visitDate: b.visitDate || new Date().toISOString().slice(0,10), staff: user.name, templateId: b.templateId, values: b.values || {}, alerts: b.alerts || [], note: b.note || '', images, createdAt: new Date().toISOString() }; db.records.push(row); customer.lastVisit = row.visitDate; customer.alerts = [...new Set([...(customer.alerts || []), ...row.alerts])]; await save(); return json(res, 201, row); }
+  if (pathname === '/api/records' && req.method === 'POST') { const b = await body(req); const customer = tenantRows('customers', user).find(c => c.id === b.customerId); if (!customer) return json(res, 400, { error: '顧客を選択してください' }); const images = (Array.isArray(b.images) ? b.images : [b.image]).filter(image => /^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(String(image || ''))).slice(0, 3); if (images.some(image => image.length > 4_000_000)) return json(res, 413, { error: '1枚あたりの画像容量が大きすぎます。撮影または選択し直してください' }); const chartGender = ['male', 'female', 'common'].includes(b.chartGender) ? b.chartGender : ''; const row = { id: id('r'), tenantId: user.tenantId, customerId: customer.id, visitDate: b.visitDate || new Date().toISOString().slice(0,10), staff: user.name, templateId: b.templateId, chartGender, values: b.values || {}, alerts: b.alerts || [], note: b.note || '', images, createdAt: new Date().toISOString() }; db.records.push(row); customer.lastVisit = row.visitDate; if (['male', 'female'].includes(chartGender) && !customer.gender) customer.gender = chartGender; customer.alerts = [...new Set([...(customer.alerts || []), ...row.alerts])]; await save(); return json(res, 201, row); }
   return json(res, 404, { error: 'APIが見つかりません' });
 }
 

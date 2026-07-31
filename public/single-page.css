@@ -226,6 +226,13 @@
 .last-visit { margin-bottom: 10px; }
 .customer-source-store { margin: -4px 0 12px; padding: 7px 10px; border-radius: 8px; background: #eef5f2; color: #45675a; font-size: 12px; font-weight: 700; }
 .customer-source-store.read-only { background: #f4f0fa; color: #70588b; }
+.customer-gender-control { margin: 8px 0 12px; padding: 10px 12px; border-radius: 10px; background: #f7f7f7; }
+.customer-gender-control label { margin: 0; }
+.customer-gender-control select { width: 100%; }
+.gender-badge.male { color: #315f8f; background: #e8f2fc; }
+.gender-badge.female { color: #a13761; background: #fdebf2; }
+.gender-badge.common { color: #45675a; background: #eaf4ee; }
+.gender-badge.unset { color: #666; background: #eee; }
 .customer-basic-info { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
 .customer-basic-info h3 { margin: 0 0 8px; }
 .customer-basic-info > div { display: grid; grid-template-columns: 82px 1fr; gap: 8px; padding: 8px 0; border-bottom: 1px solid #edf0ee; }

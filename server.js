@@ -21,6 +21,7 @@ function loadLocalEnv() {
   }
 }
 loadLocalEnv();
+if (!process.env.OPENAI_API_KEY && process.env.OPEN_AI_APIKEY) process.env.OPENAI_API_KEY = process.env.OPEN_AI_APIKEY;
 
 const PORT = Number(process.env.PORT || 8798);
 const STORE_FILE = path.join(ROOT, 'data', 'store.json');
@@ -94,6 +95,95 @@ async function runOcr(image, template) {
   const raw = await response.text();
   let result;
   try { result = JSON.parse(raw); } catch { result = null; }
+  if (!response.ok) throw Object.assign(new Error(result?.error?.message || `AI OCRに失敗しました（HTTP ${response.status}）`), { status: response.status });
+  if (!result) throw Object.assign(new Error('AI OCRから不正な応答を受信しました'), { status: 502 });
+  return parseModelJson(outputText(result));
+}
+
+async function runFootOcr(images) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw Object.assign(new Error('OPENAI_API_KEY が設定されていません。'), { status: 503 });
+  images = (Array.isArray(images) ? images : [images]).filter(Boolean).slice(0, 2);
+  if (!images.length || images.some(image => !/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(image))) throw Object.assign(new Error('PNG・JPEG・WEBP・GIF画像を1〜2枚選択してください。'), { status: 400 });
+  const prompt = `フットケアのカウンセリングシート画像を正確に読み取ってください。チェック済みの選択肢は項目名を列挙し、自由記載と合わせて読みやすい日本語の文字列にします。推測できない値は空文字にし、JSON以外は出力しません。
+出力形式:
+{"kana":"フリガナ","customerNo":"No.","name":"氏名","email":"メール","phone":"TEL","address":"住所","birthDate":"生年月日","occupation":"職業","footCondition":"1枚目の足の状態のチェック項目、病名、治療法、痛み、その他","lifestyle":"1枚目の生活習慣のチェック項目と自由記載","footCareHistory":"1枚目のフットケア経験のチェック項目、内容、方法、症状","consentDate":"1枚目の個人情報保護方針同意日","consentName":"1枚目の同意者氏名","treatmentConsentDate":"2枚目の施術同意日","treatmentConsentName":"2枚目の同意者氏名","skinTone":"2枚目の肌の色調","keratinCondition":"2枚目の角質の状態と図示内容","dailyCare":"2枚目のデイリーケア方法等","otherNotes":"2枚目のその他の記載"}`;
+  const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5.6', store: false, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, ...images.map(image => ({ type: 'input_image', image_url: image, detail: 'original' }))] }] }) });
+  const raw = await response.text();
+  let result;
+  try { result = JSON.parse(raw); } catch { result = null; }
+  if (!response.ok) throw Object.assign(new Error(result?.error?.message || `AI OCRに失敗しました（HTTP ${response.status}）`), { status: response.status });
+  if (!result) throw Object.assign(new Error('AI OCRから不正な応答を受信しました'), { status: 502 });
+  return parseModelJson(outputText(result));
+}
+
+async function runFacialOcr(images) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw Object.assign(new Error('OPENAI_API_KEY が設定されていません。'), { status: 503 });
+  images = (Array.isArray(images) ? images : [images]).filter(Boolean).slice(0, 2);
+  if (!images.length || images.some(image => !/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(image))) throw Object.assign(new Error('PNG・JPEG・WEBP・GIF画像を1〜2枚選択してください。'), { status: 400 });
+  const prompt = `フェイシャルワックスのカウンセリングシート画像を正確に読み取ってください。チェック済みの選択肢は項目名を列挙し、自由記載と合わせて読みやすい日本語の文字列にします。図の赤い斜線部分は施術部位として読み取ります。推測できない値は空文字にし、JSON以外は出力しません。
+出力形式:
+{"kana":"フリガナ","customerNo":"No.","name":"氏名","email":"メール","phone":"TEL","address":"住所","birthDate":"生年月日","occupation":"職業","skinCondition":"1枚目のお肌の状態、お手入れ方法、赤み、化粧品トラブル、その他","lifestyle":"1枚目の生活習慣、病気、薬、ピーリング等","hairRemovalHistory":"1枚目の脱毛経験、方法、部位、自己処理、肌トラブル","consentDate":"1枚目の個人情報保護方針同意日","consentName":"1枚目の同意者氏名","treatmentConsentDate":"2枚目の施術同意日","treatmentConsentName":"2枚目の同意者氏名","waxAreas":"2枚目の図示されたワックス脱毛施術部位","cosmetics":"2枚目の使用化粧品","dailyCare":"2枚目の朝夜のデイリーケア方法等"}`;
+  const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5.6', store: false, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, ...images.map(image => ({ type: 'input_image', image_url: image, detail: 'original' }))] }] }) });
+  const raw = await response.text();let result;try { result = JSON.parse(raw); } catch { result = null; }
+  if (!response.ok) throw Object.assign(new Error(result?.error?.message || `AI OCRに失敗しました（HTTP ${response.status}）`), { status: response.status });
+  if (!result) throw Object.assign(new Error('AI OCRから不正な応答を受信しました'), { status: 502 });
+  return parseModelJson(outputText(result));
+}
+
+async function runBodyOcr(images) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw Object.assign(new Error('OPENAI_API_KEY が設定されていません。'), { status: 503 });
+  images = (Array.isArray(images) ? images : [images]).filter(Boolean).slice(0, 2);
+  if (!images.length || images.some(image => !/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(image))) throw Object.assign(new Error('PNG・JPEG・WEBP・GIF画像を1〜2枚選択してください。'), { status: 400 });
+  const prompt = `ボディワックスのカウンセリングシート画像を正確に読み取ってください。チェック済みの選択肢は項目名を列挙し、自由記載と合わせて読みやすい日本語の文字列にします。人体図の色付き部分は施術部位として読み取り、VIOデザインも判別します。推測できない値は空文字にし、JSON以外は出力しません。
+出力形式:
+{"kana":"フリガナ","customerNo":"No.","name":"氏名","email":"メール","phone":"TEL","address":"住所","birthDate":"生年月日","occupation":"職業","skinCondition":"1枚目のお肌の状態、お手入れ方法、赤み、汗やムレ、その他","lifestyle":"1枚目の生活習慣、病気、薬等","hairRemovalHistory":"1枚目の脱毛経験、方法、部位、自己処理、肌トラブル","consentDate":"1枚目の個人情報保護方針同意日","consentName":"1枚目の同意者氏名","treatmentConsentDate":"2枚目の施術同意日","treatmentConsentName":"2枚目の同意者氏名","bodyAreas":"2枚目の人体図と記載から読み取った施術部位","vioDesign":"2枚目のVIOデザイン","cosmetics":"2枚目の使用化粧品","dailyCare":"2枚目の施術後注意とデイリーケア方法等"}`;
+  const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5.6', store: false, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, ...images.map(image => ({ type: 'input_image', image_url: image, detail: 'original' }))] }] }) });
+  const raw = await response.text();let result;try { result = JSON.parse(raw); } catch { result = null; }
+  if (!response.ok) throw Object.assign(new Error(result?.error?.message || `AI OCRに失敗しました（HTTP ${response.status}）`), { status: response.status });
+  if (!result) throw Object.assign(new Error('AI OCRから不正な応答を受信しました'), { status: 502 });
+  return parseModelJson(outputText(result));
+}
+
+async function runProgressFacialOcr(image) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw Object.assign(new Error('OPENAI_API_KEY が設定されていません。'), { status: 503 });
+  if (!/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(image || '')) throw Object.assign(new Error('PNG・JPEG・WEBP・GIF画像を選択してください。'), { status: 400 });
+  const prompt = `フェイシャルワックス施術の途中経過カルテ画像を正確に読み取ってください。図の赤い斜線部分も施術部位として読み取り、推測できない値は空文字にします。JSON以外は出力しません。
+出力形式:
+{"recordNo":"No.","name":"お客様名","serviceDateTime":"施術日と時刻","staff":"担当","treatmentAreas":"施術部位と図示部位","waxUsed":"使用ワックス","skinCondition":"お肌の状態","concerns":"気になること","customerRequest":"お客様のご希望","cautions":"注意事項・同意内容","comment":"施術コメント","pos":"POS欄","store":"店舗","assignedStaff":"下段の担当者"}`;
+  const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5.6', store: false, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, { type: 'input_image', image_url: image, detail: 'original' }] }] }) });
+  const raw = await response.text();let result;try { result = JSON.parse(raw); } catch { result = null; }
+  if (!response.ok) throw Object.assign(new Error(result?.error?.message || `AI OCRに失敗しました（HTTP ${response.status}）`), { status: response.status });
+  if (!result) throw Object.assign(new Error('AI OCRから不正な応答を受信しました'), { status: 502 });
+  return parseModelJson(outputText(result));
+}
+
+async function runProgressFootOcr(image) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw Object.assign(new Error('OPENAI_API_KEY が設定されていません。'), { status: 503 });
+  if (!/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(image || '')) throw Object.assign(new Error('PNG・JPEG・WEBP・GIF画像を選択してください。'), { status: 400 });
+  const prompt = `フットケア施術の途中経過カルテ画像を正確に読み取ってください。推測できない値は空文字にし、JSON以外は出力しません。
+出力形式:
+{"recordNo":"No.","name":"お客様名","serviceDateTime":"施術日と時刻","staff":"担当","treatmentDetails":"施術内容","productsUsed":"使用商品","comment":"足の状態と施術コメント、ホームケア案内","retail":"物販","discount":"割引","amount":"金額","discountedAmount":"割引後金額"}`;
+  const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5.6', store: false, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, { type: 'input_image', image_url: image, detail: 'original' }] }] }) });
+  const raw = await response.text();let result;try { result = JSON.parse(raw); } catch { result = null; }
+  if (!response.ok) throw Object.assign(new Error(result?.error?.message || `AI OCRに失敗しました（HTTP ${response.status}）`), { status: response.status });
+  if (!result) throw Object.assign(new Error('AI OCRから不正な応答を受信しました'), { status: 502 });
+  return parseModelJson(outputText(result));
+}
+
+async function runProgressBodyOcr(image) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw Object.assign(new Error('OPENAI_API_KEY が設定されていません。'), { status: 503 });
+  if (!/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(image || '')) throw Object.assign(new Error('PNG・JPEG・WEBP・GIF画像を選択してください。'), { status: 400 });
+  const prompt = `ボディワックス施術の途中経過カルテ画像を正確に読み取ってください。人体図の赤い斜線部分は施術部位として読み取り、除外部位も明記します。推測できない値は空文字にし、JSON以外は出力しません。
+出力形式:
+{"recordNo":"No.","name":"お客様名","serviceDateTime":"施術日と時刻","staff":"担当","treatmentDetails":"施術内容、施術部位、除外部位と図示部位","productsUsed":"使用商品","comment":"肌状態、自己処理、施術コメント、施術後案内","retail":"物販","discount":"割引","amount":"金額","discountedAmount":"割引後金額"}`;
+  const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-5.6', store: false, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, { type: 'input_image', image_url: image, detail: 'original' }] }] }) });
+  const raw = await response.text();let result;try { result = JSON.parse(raw); } catch { result = null; }
   if (!response.ok) throw Object.assign(new Error(result?.error?.message || `AI OCRに失敗しました（HTTP ${response.status}）`), { status: response.status });
   if (!result) throw Object.assign(new Error('AI OCRから不正な応答を受信しました'), { status: 502 });
   return parseModelJson(outputText(result));
@@ -299,6 +389,12 @@ async function api(req, res, pathname) {
   if (pathname === '/api/templates' && req.method === 'POST') { if (user.role !== 'owner') return json(res, 403, { error: 'オーナー権限が必要です' }); const b = await body(req); const row = { id: id('tpl'), tenantId: user.tenantId, name: b.name || '新しいカルテ', active: true, updatedAt: new Date().toISOString().slice(0,10), fields: b.fields || [] }; db.templates.push(row); await save(); return json(res, 201, row); }
   const tm = pathname.match(/^\/api\/templates\/([^/]+)$/);
   if (tm && req.method === 'PUT') { if (user.role !== 'owner') return json(res, 403, { error: 'オーナー権限が必要です' }); const row = tenantRows('templates', user).find(x => x.id === tm[1]); if (!row) return json(res, 404, { error: 'テンプレートが見つかりません' }); Object.assign(row, await body(req), { id: row.id, tenantId: row.tenantId, updatedAt: new Date().toISOString().slice(0,10) }); await save(); return json(res, 200, row); }
+  if (pathname === '/api/ocr/foot' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runFootOcr(b.images || b.image)); }
+  if (pathname === '/api/ocr/facial' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runFacialOcr(b.images || b.image)); }
+  if (pathname === '/api/ocr/body' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runBodyOcr(b.images || b.image)); }
+  if (pathname === '/api/ocr/facial-progress' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runProgressFacialOcr(b.image)); }
+  if (pathname === '/api/ocr/foot-progress' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runProgressFootOcr(b.image)); }
+  if (pathname === '/api/ocr/body-progress' && req.method === 'POST') { const b = await body(req); return json(res, 200, await runProgressBodyOcr(b.image)); }
   if (pathname === '/api/ocr' && req.method === 'POST') { const b = await body(req); const template = tenantRows('templates', user).find(x => x.id === b.templateId); if (!template) return json(res, 404, { error: 'テンプレートが見つかりません' }); return json(res, 200, await runOcr(b.image, template)); }
   if (pathname === '/api/ocr/demo' && req.method === 'POST') return json(res, 200, { customerName: '山田 花子', visitDate: new Date().toISOString().slice(0,10), values: { name: '山田 花子', visitDate: new Date().toISOString().slice(0,10), concern: '頬の乾燥、夕方のくすみが気になる', allergy: 'ラテックスアレルギーあり', redness: 'アルコール配合化粧水で赤みが出やすい', treatment: '保湿フェイシャル 60分', preference: '香りのない製品、マッサージは弱め希望' }, confidence: { name: .98, visitDate: .96, concern: .87, allergy: .93, redness: .84, treatment: .91, preference: .86 }, alerts: ['ラテックスアレルギー', 'アルコール成分で赤みが出やすい'] });
   if (pathname === '/api/records' && req.method === 'POST') { const b = await body(req); const customer = tenantRows('customers', user).find(c => c.id === b.customerId); if (!customer) return json(res, 400, { error: '顧客を選択してください' }); const row = { id: id('r'), tenantId: user.tenantId, customerId: customer.id, visitDate: b.visitDate || new Date().toISOString().slice(0,10), staff: user.name, templateId: b.templateId, values: b.values || {}, alerts: b.alerts || [], note: b.note || '', createdAt: new Date().toISOString() }; db.records.push(row); customer.lastVisit = row.visitDate; customer.alerts = [...new Set([...(customer.alerts || []), ...row.alerts])]; await save(); return json(res, 201, row); }

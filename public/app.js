@@ -1,6 +1,5 @@
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
-const state = { token: sessionStorage.getItem('salonToken'), user: null, customers: [], templates: [], scan: null, image: '', selectedTemplate: null };
-const pages = { admin:['ホーム','SalonRecord全体の稼働状態と利用状況'],adminCustomers:['顧客編集','契約店舗とログインアカウントを管理'],dashboard:['ホーム','今日も心地よいサロンワークを。'],customers:['お客様','カルテと施術履歴を一元管理'],scan:['カルテ読取','手書きカルテをAIでデータ化'],templates:['フォーム設定','店舗のカルテに合わせて読取範囲を設定'],accounts:['アカウント管理','店舗ごとの施術者アカウントを管理'] };
+const state = { token: sessionStorage.getItem('salonToken'), user: null, customers: [], templates: [], scan: null, image: '', images: [], treatmentType: 'フット', workflowStage: 'new', selectedTemplate: null };
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function api(url, options={}, attempt=0) {
   const method=(options.method||'GET').toUpperCase();
@@ -30,8 +29,180 @@ function fmt(d){if(!d)return '—';const x=new Date(d+'T00:00:00');return `${x.g
 
 $('#loginForm').addEventListener('submit',async e=>{e.preventDefault();$('#loginError').textContent='';try{const b=Object.fromEntries(new FormData(e.target));const r=await api('/api/login',{method:'POST',body:JSON.stringify(b)});state.token=r.token;sessionStorage.setItem('salonToken',r.token);await boot(r.user)}catch(x){if(x.data?.code==='TENANT_SELECTION_REQUIRED'){const select=$('#tenantSelect');select.innerHTML=x.data.tenants.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');select.required=true;$('#tenantField').classList.remove('hidden');$('#loginError').textContent='ログインする店舗を選択してください'}else $('#loginError').textContent=x.message}});
 $('#logout').onclick=async()=>{try{await api('/api/logout',{method:'POST'})}catch{}sessionStorage.removeItem('salonToken');location.reload()};
-async function boot(user){try{state.user=user||await api('/api/me');$('#login').classList.add('hidden');$('#app').classList.remove('hidden');$('#salonName').textContent=state.user.role==='system_admin'?'システム全体':[state.user.tenant.companyName,state.user.tenant.name].filter(Boolean).join(' ／ ');$('#userName').textContent=state.user.name;$('#userInitial').textContent=state.user.name[0];$('#userRole').textContent=state.user.role==='system_admin'?'システム管理者':state.user.role==='owner'?'オーナー':'スタッフ';if(state.user.role==='system_admin'){$('#adminNav').classList.remove('hidden');$('#adminCustomersNav').classList.remove('hidden');$$('.tenant-nav').forEach(el=>el.classList.add('hidden'))}else if(state.user.role==='owner')$('#accountNav').classList.remove('hidden');$$('nav button').forEach(b=>b.onclick=()=>show(b.dataset.view));await show(state.user.role==='system_admin'?'admin':'dashboard')}catch(e){if(e.status===401){sessionStorage.removeItem('salonToken');state.token=null}else{$('#loginError').textContent=e.message}}}
-async function show(name){$$('nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===name));$('#pageTitle').textContent=pages[name][0];$('#pageSub').textContent=pages[name][1];$('#content').innerHTML='<div class="empty">読み込み中…</div>';try{await ({admin:renderAdmin,adminCustomers:renderAdminCustomers,dashboard:renderDashboard,customers:renderCustomers,scan:renderScan,templates:renderTemplates,accounts:renderAccounts}[name])()}catch(e){if(e.status===401){sessionStorage.removeItem('salonToken');location.reload();return}$('#content').innerHTML=`<div class="card error">${esc(e.message)}<div style="margin-top:14px"><button class="ghost" onclick="show('${name}')">再読み込み</button></div></div>`}}
+async function boot(user){try{state.user=user||await api('/api/me');$('#login').classList.add('hidden');$('#app').classList.remove('hidden');$('#salonName').textContent=state.user.role==='system_admin'?'システム全体':[state.user.tenant.companyName,state.user.tenant.name].filter(Boolean).join(' ／ ');$('#userName').textContent=state.user.name;$('#userInitial').textContent=state.user.name[0];$('#userRole').textContent=state.user.role==='system_admin'?'システム管理者':state.user.role==='owner'?'オーナー':'スタッフ';if(state.user.role==='system_admin'){$$('.tenant-action').forEach(el=>el.classList.add('hidden'));$$('.admin-action').forEach(el=>el.classList.remove('hidden'))}else if(state.user.role==='owner')$('#accountAction').classList.remove('hidden');$$('#workspaceActions button').forEach(button=>button.onclick=()=>show(button.dataset.view));$('#homeButton').onclick=()=>show(state.user.role==='system_admin'?'admin':'dashboard');await show(state.user.role==='system_admin'?'admin':'dashboard')}catch(e){if(e.status===401){sessionStorage.removeItem('salonToken');state.token=null}else{$('#loginError').textContent=e.message}}}
+async function show(name){$('#content').innerHTML='<div class="empty">読み込み中…</div>';try{await ({admin:renderAdmin,adminCustomers:renderAdminCustomers,dashboard:renderDashboard,customers:renderCustomers,scan:renderScan,templates:renderTemplates,accounts:renderAccounts}[name])();enhanceCurrentView(name)}catch(e){if(e.status===401){sessionStorage.removeItem('salonToken');location.reload();return}$('#content').innerHTML=`<div class="card error">${esc(e.message)}<div style="margin-top:14px"><button class="ghost" onclick="show('${name}')">再読み込み</button></div></div>`}}
+function createTreatmentActions(stage='new'){
+  const actions=document.createElement('div');
+  actions.className='hero-actions';
+  ['フット','フェイシャル','ボディ'].forEach(label=>{
+    const button=document.createElement('button');
+    button.type='button';
+    button.className='ghost treatment-chart-button';
+    button.textContent=label;
+    button.onclick=()=>openTreatmentScan(label,stage);
+    actions.append(button);
+  });
+  return actions;
+}
+async function openTreatmentScan(label,stage='new'){
+  if(!['フット','フェイシャル','ボディ'].includes(label)){await show('scan');return}
+  state.treatmentType=label;
+  state.workflowStage=stage;
+  const picker=$('#footFilePicker');
+  picker.value='';
+  picker.onchange=async()=>{
+    const files=[...picker.files].slice(0,2);
+    if(!files.length)return;
+    if(picker.files.length>2)toast('画像は先頭の2枚を読み込みました');
+    state.images=await Promise.all(files.map(file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file)})));
+    state.image=state.images[0];state.scan=null;
+    if(state.workflowStage==='progress'&&state.treatmentType==='フェイシャル')showProgressFacialImagePreview();else if(state.workflowStage==='progress'&&state.treatmentType==='フット')showProgressFootImagePreview();else if(state.workflowStage==='progress'&&state.treatmentType==='ボディ')showProgressBodyImagePreview();else if(state.treatmentType==='フェイシャル')showSelectedFacialImagePreview();else if(state.treatmentType==='ボディ')showSelectedBodyImagePreview();else showSelectedImagePreview();
+  };
+  picker.click();
+}
+function showProgressBodyImagePreview(){
+  const hero=$('.hero'),image=state.images[0]||state.image;if(!hero||!image)return;
+  state.images=[image];state.image=image;$('.image-preview-frame')?.remove();
+  const frame=document.createElement('section');frame.className='card image-preview-frame';
+  frame.innerHTML=`<div class="section-head"><h2>途中経過・ボディ OCR記入欄</h2><div class="ocr-heading-actions"><span class="badge">ボディ</span><button type="button" class="primary" id="runProgressBodyOcr">OCR</button></div></div><div class="image-ocr-layout"><div class="selected-image-preview"><figure><figcaption>途中経過画像</figcaption><img src="${image}" alt="ボディ途中経過カルテ画像"></figure></div><form class="progress-body-fields" autocomplete="off"><div class="ocr-field-grid"><label>No.<input name="recordNo" placeholder="OCR結果"></label><label>お客様名<input name="name" placeholder="OCR結果"></label><label>施術日時<input name="serviceDateTime" placeholder="年 月 日・時刻"></label><label>担当<input name="staff" placeholder="OCR結果"></label></div><section class="ocr-form-section"><h3>施術内容・施術部位</h3><textarea name="treatmentDetails" rows="5" placeholder="全身、両腕、両脚、背中、お腹、胸、うなじなど"></textarea></section><section class="ocr-form-section"><h3>使用商品</h3><textarea name="productsUsed" rows="5" placeholder="ワックス、プレ・アフターローション、保湿ジェルなど"></textarea></section><section class="ocr-form-section"><h3>コメント</h3><textarea name="comment" rows="5" placeholder="肌状態、自己処理、施術後の案内など"></textarea></section><section class="ocr-form-section"><h3>物販</h3><textarea name="retail" rows="3" placeholder="OCR結果"></textarea></section><section class="ocr-form-section"><h3>割引</h3><textarea name="discount" rows="3" placeholder="OCR結果"></textarea></section><div class="ocr-field-grid"><label>金額<input name="amount" placeholder="OCR結果"></label><label>割引後金額<input name="discountedAmount" placeholder="OCR結果"></label></div></form></div>`;
+  hero.insertAdjacentElement('afterend',frame);addOcrCloseButton(frame);$('#runProgressBodyOcr').onclick=runProgressBodyOcr;
+}
+async function runProgressBodyOcr(){
+  const button=$('#runProgressBodyOcr'),frame=$('.image-preview-frame');if(!button||!frame)return;button.disabled=true;button.textContent='OCR中…';
+  try{const result=await api('/api/ocr/body-progress',{method:'POST',body:JSON.stringify({image:state.image})});['recordNo','name','serviceDateTime','staff','treatmentDetails','productsUsed','comment','retail','discount','amount','discountedAmount'].forEach(key=>{const field=frame.querySelector(`[name="${key}"]`);if(field)field.value=result[key]||''});markOcrReady(frame);toast('途中経過のOCR結果を入力欄へ反映しました')}catch(error){toast(error.message)}finally{button.disabled=false;button.textContent='OCR'}
+}
+function showProgressFootImagePreview(){
+  const hero=$('.hero'),image=state.images[0]||state.image;if(!hero||!image)return;
+  state.images=[image];state.image=image;$('.image-preview-frame')?.remove();
+  const frame=document.createElement('section');frame.className='card image-preview-frame';
+  frame.innerHTML=`<div class="section-head"><h2>途中経過・フット OCR記入欄</h2><div class="ocr-heading-actions"><span class="badge">フット</span><button type="button" class="primary" id="runProgressFootOcr">OCR</button></div></div><div class="image-ocr-layout"><div class="selected-image-preview"><figure><figcaption>途中経過画像</figcaption><img src="${image}" alt="フット途中経過カルテ画像"></figure></div><form class="progress-foot-fields" autocomplete="off"><div class="ocr-field-grid"><label>No.<input name="recordNo" placeholder="OCR結果"></label><label>お客様名<input name="name" placeholder="OCR結果"></label><label>施術日時<input name="serviceDateTime" placeholder="年 月 日・時刻"></label><label>担当<input name="staff" placeholder="OCR結果"></label></div><section class="ocr-form-section"><h3>施術内容</h3><textarea name="treatmentDetails" rows="5" placeholder="足浴、角質除去、爪の調整、保湿など"></textarea></section><section class="ocr-form-section"><h3>使用商品</h3><textarea name="productsUsed" rows="5" placeholder="OCR結果"></textarea></section><section class="ocr-form-section"><h3>コメント</h3><textarea name="comment" rows="5" placeholder="足の状態、施術内容、ホームケア案内など"></textarea></section><section class="ocr-form-section"><h3>物販</h3><textarea name="retail" rows="3" placeholder="OCR結果"></textarea></section><section class="ocr-form-section"><h3>割引</h3><textarea name="discount" rows="3" placeholder="OCR結果"></textarea></section><div class="ocr-field-grid"><label>金額<input name="amount" placeholder="OCR結果"></label><label>割引後金額<input name="discountedAmount" placeholder="OCR結果"></label></div></form></div>`;
+  hero.insertAdjacentElement('afterend',frame);addOcrCloseButton(frame);$('#runProgressFootOcr').onclick=runProgressFootOcr;
+}
+async function runProgressFootOcr(){
+  const button=$('#runProgressFootOcr'),frame=$('.image-preview-frame');if(!button||!frame)return;button.disabled=true;button.textContent='OCR中…';
+  try{const result=await api('/api/ocr/foot-progress',{method:'POST',body:JSON.stringify({image:state.image})});['recordNo','name','serviceDateTime','staff','treatmentDetails','productsUsed','comment','retail','discount','amount','discountedAmount'].forEach(key=>{const field=frame.querySelector(`[name="${key}"]`);if(field)field.value=result[key]||''});markOcrReady(frame);toast('途中経過のOCR結果を入力欄へ反映しました')}catch(error){toast(error.message)}finally{button.disabled=false;button.textContent='OCR'}
+}
+function showProgressFacialImagePreview(){
+  const hero=$('.hero'),image=state.images[0]||state.image;if(!hero||!image)return;
+  state.images=[image];state.image=image;$('.image-preview-frame')?.remove();
+  const frame=document.createElement('section');frame.className='card image-preview-frame';
+  frame.innerHTML=`<div class="section-head"><h2>途中経過・フェイシャル OCR記入欄</h2><div class="ocr-heading-actions"><span class="badge">フェイシャル</span><button type="button" class="primary" id="runProgressFacialOcr">OCR</button></div></div><div class="image-ocr-layout"><div class="selected-image-preview"><figure><figcaption>途中経過画像</figcaption><img src="${image}" alt="フェイシャル途中経過カルテ画像"></figure></div><form class="progress-facial-fields" autocomplete="off"><div class="ocr-field-grid"><label>No.<input name="recordNo" placeholder="OCR結果"></label><label>お客様名<input name="name" placeholder="OCR結果"></label><label>施術日時<input name="serviceDateTime" placeholder="年 月 日・時刻"></label><label>担当<input name="staff" placeholder="OCR結果"></label><label class="field-wide">施術部位<textarea name="treatmentAreas" rows="3" placeholder="額、眉間、鼻、口上、ほほ、あごなど"></textarea></label><label class="field-wide">使用ワックス<textarea name="waxUsed" rows="3" placeholder="OCR結果"></textarea></label></div><section class="ocr-form-section"><h3>お肌の状態</h3><textarea name="skinCondition" rows="5" placeholder="OCR結果"></textarea></section><section class="ocr-form-section"><h3>気になること</h3><textarea name="concerns" rows="5" placeholder="OCR結果"></textarea></section><section class="ocr-form-section"><h3>お客様のご希望</h3><textarea name="customerRequest" rows="5" placeholder="OCR結果"></textarea></section><section class="ocr-form-section"><h3>注意事項・同意内容</h3><textarea name="cautions" rows="5" placeholder="OCR結果"></textarea></section><section class="ocr-form-section"><h3>コメント</h3><textarea name="comment" rows="5" placeholder="OCR結果"></textarea></section><section class="ocr-form-section"><h3>POS</h3><textarea name="pos" rows="3" placeholder="OCR結果"></textarea></section><div class="ocr-field-grid"><label>店舗<input name="store" placeholder="OCR結果"></label><label>担当者<input name="assignedStaff" placeholder="OCR結果"></label></div></form></div>`;
+  hero.insertAdjacentElement('afterend',frame);addOcrCloseButton(frame);$('#runProgressFacialOcr').onclick=runProgressFacialOcr;
+}
+async function runProgressFacialOcr(){
+  const button=$('#runProgressFacialOcr'),frame=$('.image-preview-frame');if(!button||!frame)return;button.disabled=true;button.textContent='OCR中…';
+  try{const result=await api('/api/ocr/facial-progress',{method:'POST',body:JSON.stringify({image:state.image})});['recordNo','name','serviceDateTime','staff','treatmentAreas','waxUsed','skinCondition','concerns','customerRequest','cautions','comment','pos','store','assignedStaff'].forEach(key=>{const field=frame.querySelector(`[name="${key}"]`);if(field)field.value=result[key]||''});markOcrReady(frame);toast('途中経過のOCR結果を入力欄へ反映しました')}catch(error){toast(error.message)}finally{button.disabled=false;button.textContent='OCR'}
+}
+function facialFieldsFirst(){return `<form class="facial-ocr-fields" autocomplete="off"><div class="ocr-field-grid"><label>フリガナ<input name="kana" placeholder="OCR結果"></label><label>No.<input name="customerNo" placeholder="OCR結果"></label><label>お名前<input name="name" placeholder="OCR結果"></label><label>メール<input name="email" type="email" placeholder="OCR結果"></label><label>TEL<input name="phone" placeholder="OCR結果"></label><label class="field-wide">ご住所<textarea name="address" rows="2" placeholder="OCR結果"></textarea></label><label>生年月日<input name="birthDate" placeholder="西暦 年 月 日"></label><label>ご職業<input name="occupation" placeholder="OCR結果"></label></div><section class="ocr-form-section"><h3>お肌の状態・お手入れ方法</h3><textarea name="skinCondition" rows="5" placeholder="乾燥肌、脂性肌、普通肌、ニキビ肌、敏感肌、化粧品トラブル、赤みなど"></textarea></section><section class="ocr-form-section"><h3>生活習慣</h3><textarea name="lifestyle" rows="5" placeholder="紫外線、妊娠、アレルギー、スポーツ、通院、常用薬、ピーリングなど"></textarea></section><section class="ocr-form-section"><h3>脱毛の経験</h3><textarea name="hairRemovalHistory" rows="5" placeholder="サロン脱毛、ワックス脱毛、自己処理、脱毛後の肌トラブル"></textarea></section><div class="ocr-field-grid consent-fields"><label>個人情報同意日<input name="consentDate" placeholder="西暦 年 月 日"></label><label>同意者氏名<input name="consentName" placeholder="OCR結果"></label></div></form>`}
+function facialFieldsSecond(){return `<form class="facial-ocr-fields second-page-fields" autocomplete="off"><div class="ocr-field-grid consent-fields"><label>施術同意日<input name="treatmentConsentDate" placeholder="西暦 年 月 日"></label><label>同意者氏名<input name="treatmentConsentName" placeholder="OCR結果"></label></div><section class="ocr-form-section"><h3>ワックス脱毛施術部位</h3><textarea name="waxAreas" rows="5" placeholder="額、眉間、口上、ほほ、鼻、あごなど"></textarea></section><section class="ocr-form-section"><h3>使用化粧品</h3><textarea name="cosmetics" rows="7" placeholder="クレンジング、洗顔料、化粧水、美容液、乳液、日焼け止めなど"></textarea></section><section class="ocr-form-section"><h3>デイリーケア方法等</h3><textarea name="dailyCare" rows="7" placeholder="朝・夜のケア手順、保湿パックなど"></textarea></section></form>`}
+function showSelectedFacialImagePreview(){
+  const hero=$('.hero'),images=state.images.length?state.images:[state.image].filter(Boolean);if(!hero||!images.length)return;
+  $('.image-preview-frame')?.remove();
+  const frame=document.createElement('section');frame.className='card image-preview-frame';
+  frame.innerHTML=`<div class="section-head"><h2>選択した画像・OCR記入欄</h2><div class="ocr-heading-actions"><span class="badge">フェイシャル ${images.length}枚</span><button type="button" class="primary" id="runFacialOcr">OCR</button></div></div><div class="image-ocr-layout"><div class="selected-image-preview"><figure><figcaption>1枚目</figcaption><img src="${images[0]}" alt="選択したフェイシャルカルテ画像 1枚目"></figure></div>${facialFieldsFirst()}</div>`;
+  if(images[1])frame.insertAdjacentHTML('beforeend',`<div class="image-ocr-layout second-page-layout"><div class="selected-image-preview"><figure><figcaption>2枚目</figcaption><img src="${images[1]}" alt="選択したフェイシャルカルテ画像 2枚目"></figure></div>${facialFieldsSecond()}</div>`);
+  hero.insertAdjacentElement('afterend',frame);addOcrCloseButton(frame);$('#runFacialOcr').onclick=runSelectedFacialOcr;
+}
+async function runSelectedFacialOcr(){
+  const button=$('#runFacialOcr'),frame=$('.image-preview-frame');if(!button||!frame)return;button.disabled=true;button.textContent='OCR中…';
+  try{const images=state.images.length?state.images:[state.image];const result=await api('/api/ocr/facial',{method:'POST',body:JSON.stringify({images})});['kana','customerNo','name','email','phone','address','birthDate','occupation','skinCondition','lifestyle','hairRemovalHistory','consentDate','consentName','treatmentConsentDate','treatmentConsentName','waxAreas','cosmetics','dailyCare'].forEach(key=>{const field=frame.querySelector(`[name="${key}"]`);if(field)field.value=result[key]||''});markOcrReady(frame);toast(`${images.length}枚のOCR結果を入力欄へ反映しました`)}catch(error){toast(error.message)}finally{button.disabled=false;button.textContent='OCR'}
+}
+function bodyFieldsFirst(){return `<form class="body-ocr-fields" autocomplete="off"><div class="ocr-field-grid"><label>フリガナ<input name="kana" placeholder="OCR結果"></label><label>No.<input name="customerNo" placeholder="OCR結果"></label><label>お名前<input name="name" placeholder="OCR結果"></label><label>メール<input name="email" type="email" placeholder="OCR結果"></label><label>TEL<input name="phone" placeholder="OCR結果"></label><label class="field-wide">ご住所<textarea name="address" rows="2" placeholder="OCR結果"></textarea></label><label>生年月日<input name="birthDate" placeholder="西暦 年 月 日"></label><label>ご職業<input name="occupation" placeholder="OCR結果"></label></div><section class="ocr-form-section"><h3>お肌の状態・お手入れ方法</h3><textarea name="skinCondition" rows="5" placeholder="乾燥肌、脂性肌、普通肌、ニキビ、赤み、汗やムレなど"></textarea></section><section class="ocr-form-section"><h3>生活習慣</h3><textarea name="lifestyle" rows="5" placeholder="紫外線、妊娠、アレルギー、スポーツ、通院、常用薬など"></textarea></section><section class="ocr-form-section"><h3>脱毛の経験</h3><textarea name="hairRemovalHistory" rows="5" placeholder="サロン脱毛、ワックス脱毛、自己処理、脱毛後の肌トラブル"></textarea></section><div class="ocr-field-grid consent-fields"><label>個人情報同意日<input name="consentDate" placeholder="西暦 年 月 日"></label><label>同意者氏名<input name="consentName" placeholder="OCR結果"></label></div></form>`}
+function bodyFieldsSecond(){return `<form class="body-ocr-fields second-page-fields" autocomplete="off"><div class="ocr-field-grid consent-fields"><label>施術同意日<input name="treatmentConsentDate" placeholder="西暦 年 月 日"></label><label>同意者氏名<input name="treatmentConsentName" placeholder="OCR結果"></label></div><section class="ocr-form-section"><h3>ワックス脱毛施術部位</h3><textarea name="bodyAreas" rows="6" placeholder="VIO、両ワキ、ひじ、背中、うなじ、お腹、ヒップ、脚、腕など"></textarea></section><section class="ocr-form-section"><h3>VIOデザイン</h3><textarea name="vioDesign" rows="3" placeholder="ナチュラル、トライアングル、オーバル、ハイジニーナなど"></textarea></section><section class="ocr-form-section"><h3>使用化粧品</h3><textarea name="cosmetics" rows="6" placeholder="プレワックスローション、ワックス、アフターローション、保湿ジェルなど"></textarea></section><section class="ocr-form-section"><h3>デイリーケア方法等</h3><textarea name="dailyCare" rows="7" placeholder="施術後の注意、保湿、スクラブ、次回施術時期など"></textarea></section></form>`}
+function showSelectedBodyImagePreview(){
+  const hero=$('.hero'),images=state.images.length?state.images:[state.image].filter(Boolean);if(!hero||!images.length)return;
+  $('.image-preview-frame')?.remove();const frame=document.createElement('section');frame.className='card image-preview-frame';
+  frame.innerHTML=`<div class="section-head"><h2>選択した画像・OCR記入欄</h2><div class="ocr-heading-actions"><span class="badge">ボディ ${images.length}枚</span><button type="button" class="primary" id="runBodyOcr">OCR</button></div></div><div class="image-ocr-layout"><div class="selected-image-preview"><figure><figcaption>1枚目</figcaption><img src="${images[0]}" alt="選択したボディカルテ画像 1枚目"></figure></div>${bodyFieldsFirst()}</div>`;
+  if(images[1])frame.insertAdjacentHTML('beforeend',`<div class="image-ocr-layout second-page-layout"><div class="selected-image-preview"><figure><figcaption>2枚目</figcaption><img src="${images[1]}" alt="選択したボディカルテ画像 2枚目"></figure></div>${bodyFieldsSecond()}</div>`);
+  hero.insertAdjacentElement('afterend',frame);addOcrCloseButton(frame);$('#runBodyOcr').onclick=runSelectedBodyOcr;
+}
+async function runSelectedBodyOcr(){
+  const button=$('#runBodyOcr'),frame=$('.image-preview-frame');if(!button||!frame)return;button.disabled=true;button.textContent='OCR中…';
+  try{const images=state.images.length?state.images:[state.image];const result=await api('/api/ocr/body',{method:'POST',body:JSON.stringify({images})});['kana','customerNo','name','email','phone','address','birthDate','occupation','skinCondition','lifestyle','hairRemovalHistory','consentDate','consentName','treatmentConsentDate','treatmentConsentName','bodyAreas','vioDesign','cosmetics','dailyCare'].forEach(key=>{const field=frame.querySelector(`[name="${key}"]`);if(field)field.value=result[key]||''});markOcrReady(frame);toast(`${images.length}枚のOCR結果を入力欄へ反映しました`)}catch(error){toast(error.message)}finally{button.disabled=false;button.textContent='OCR'}
+}
+function showSelectedImagePreview(){
+  const hero=$('.hero');
+  const images=state.images.length?state.images:[state.image].filter(Boolean);
+  if(!hero||!images.length)return;
+  $('.image-preview-frame')?.remove();
+  const frame=document.createElement('section');
+  frame.className='card image-preview-frame';
+  frame.innerHTML=`<div class="section-head"><h2>選択した画像・OCR記入欄</h2><span class="badge">フット</span></div><div class="image-ocr-layout"><div class="selected-image-preview"><img src="${state.image}" alt="選択したフットカルテ画像"></div><form class="foot-ocr-fields" autocomplete="off"><div class="ocr-field-grid"><label>フリガナ<input name="kana" placeholder="OCR結果"></label><label>No.<input name="customerNo" placeholder="OCR結果"></label><label>お名前<input name="name" placeholder="OCR結果"></label><label>メール<input name="email" type="email" placeholder="OCR結果"></label><label>TEL<input name="phone" placeholder="OCR結果"></label><label class="field-wide">ご住所<textarea name="address" rows="2" placeholder="OCR結果"></textarea></label><label>生年月日<input name="birthDate" placeholder="西暦 年 月 日"></label><label>ご職業<input name="occupation" placeholder="OCR結果"></label></div><section class="ocr-form-section"><h3>足の状態</h3><textarea name="footCondition" rows="5" placeholder="タコ、ウオノメ、イボ、巻き爪、水虫、外反母趾、内反小趾、静脈瘤、むくみ、臭い、かかとのひび割れ、乾燥、かゆみ、冷え、痛み、治療中の病気、その他"></textarea></section><section class="ocr-form-section"><h3>生活習慣</h3><textarea name="lifestyle" rows="5" placeholder="立ち仕事・歩行、妊娠、アレルギー、スポーツ、通院・治療中の病気、常用薬、肌トラブル、膝・腰の痛み"></textarea></section><section class="ocr-form-section"><h3>フットケアの経験</h3><textarea name="footCareHistory" rows="5" placeholder="サロンでのフットケア、医療機関でのケア、自宅での自己処理、施術後の肌トラブル"></textarea></section><div class="ocr-field-grid consent-fields"><label>同意日<input name="consentDate" placeholder="西暦 年 月 日"></label><label>同意者氏名<input name="consentName" placeholder="OCR結果"></label></div></form></div>`;
+  frame.querySelector('.badge').textContent=`フット ${images.length}枚`;
+  frame.querySelector('.selected-image-preview').innerHTML=`<figure><figcaption>1枚目</figcaption><img src="${images[0]}" alt="選択したフットカルテ画像 1枚目"></figure>`;
+  if(images[1]){
+    const secondLayout=document.createElement('div');
+    secondLayout.className='image-ocr-layout second-page-layout';
+    secondLayout.innerHTML=`<div class="selected-image-preview"><figure><figcaption>2枚目</figcaption><img src="${images[1]}" alt="選択したフットカルテ画像 2枚目"></figure></div><form class="foot-ocr-fields second-page-fields" autocomplete="off"><div class="ocr-field-grid consent-fields"><label>施術同意日<input name="treatmentConsentDate" placeholder="西暦 年 月 日"></label><label>同意者氏名<input name="treatmentConsentName" placeholder="OCR結果"></label></div><section class="ocr-form-section"><h3>肌の色調</h3><textarea name="skinTone" rows="3" placeholder="OCR結果"></textarea></section><section class="ocr-form-section"><h3>角質の状態</h3><textarea name="keratinCondition" rows="4" placeholder="乾燥、ひび割れ、足裏の角質、タコなど"></textarea></section><section class="ocr-form-section"><h3>デイリーケア方法等</h3><textarea name="dailyCare" rows="5" placeholder="保湿、やすり、爪のケアなど"></textarea></section><section class="ocr-form-section"><h3>その他</h3><textarea name="otherNotes" rows="5" placeholder="冷え、むくみ、ご希望、施術制限など"></textarea></section></form>`;
+    frame.querySelector('.image-ocr-layout').insertAdjacentElement('afterend',secondLayout);
+  }
+  hero.insertAdjacentElement('afterend',frame);
+  const headingActions=document.createElement('div');
+  headingActions.className='ocr-heading-actions';
+  const badge=frame.querySelector('.section-head .badge');
+  badge.replaceWith(headingActions);
+  headingActions.append(badge);
+  const ocrButton=document.createElement('button');
+  ocrButton.type='button';ocrButton.id='runFootOcr';ocrButton.className='primary';ocrButton.textContent='OCR';
+  ocrButton.onclick=runSelectedFootOcr;
+  headingActions.append(ocrButton);
+  addOcrCloseButton(frame);
+}
+function addOcrCloseButton(frame){
+  const actions=frame.querySelector('.ocr-heading-actions');
+  if(!actions)return;
+  const saveButton=document.createElement('button');
+  saveButton.type='button';saveButton.className='primary ocr-save-button';saveButton.textContent='保存';saveButton.disabled=true;
+  saveButton.onclick=()=>saveOcrRecord(frame,saveButton);
+  actions.append(saveButton);
+  const closeButton=document.createElement('button');
+  closeButton.type='button';closeButton.className='ghost ocr-close-button';closeButton.textContent='閉じる';
+  closeButton.onclick=()=>{state.image='';state.images=[];state.scan=null;frame.remove()};
+  actions.append(closeButton);
+}
+function markOcrReady(frame){const saveButton=frame?.querySelector('.ocr-save-button');if(saveButton)saveButton.disabled=false}
+async function saveOcrRecord(frame,button){
+  const values={};frame.querySelectorAll('input[name],textarea[name]').forEach(field=>values[field.name]=field.value.trim());
+  if(!values.name){toast('お名前を入力してください');return}
+  button.disabled=true;button.textContent='保存中…';
+  try{
+    state.customers=await api('/api/customers');
+    const normalizedPhone=(values.phone||'').replace(/\D/g,'');
+    let customer=state.customers.find(item=>item.name===values.name&&(normalizedPhone?String(item.phone||'').replace(/\D/g,'')===normalizedPhone:true));
+    if(!customer)customer=await api('/api/customers',{method:'POST',body:JSON.stringify({name:values.name,phone:values.phone||''})});
+    if(!state.templates.length)state.templates=await api('/api/templates');
+    const template=state.templates[0];
+    if(!template)throw new Error('保存用テンプレートがありません');
+    const treatmentLabel=state.workflowStage==='progress'?`${state.treatmentType} 途中経過`:state.treatmentType;
+    values.treatment=treatmentLabel;
+    await api('/api/records',{method:'POST',body:JSON.stringify({customerId:customer.id,visitDate:new Date().toISOString().slice(0,10),templateId:template.id,values,alerts:[],note:`${treatmentLabel} OCRから保存`})});
+    button.textContent='保存済み';toast('OCR結果を保存しました');
+  }catch(error){button.disabled=false;button.textContent='保存';toast(error.message)}
+}
+async function runSelectedFootOcr(){
+  const button=$('#runFootOcr'),frame=$('.image-preview-frame');
+  if(!button||!frame||!state.image)return;
+  button.disabled=true;button.textContent='OCR中…';
+  try{const images=state.images.length?state.images:[state.image];const result=await api('/api/ocr/foot',{method:'POST',body:JSON.stringify({images})});['kana','customerNo','name','email','phone','address','birthDate','occupation','footCondition','lifestyle','footCareHistory','consentDate','consentName','treatmentConsentDate','treatmentConsentName','skinTone','keratinCondition','dailyCare','otherNotes'].forEach(key=>{const field=frame.querySelector(`[name="${key}"]`);if(field)field.value=result[key]||''});markOcrReady(frame);toast(`${images.length}枚のOCR結果を入力欄へ反映しました`)}catch(error){toast(error.message)}finally{button.disabled=false;button.textContent='OCR'}
+}
+function enhanceCurrentView(name){
+  if(name!=='dashboard')return;
+  const hero=$('.hero');
+  const heading=$('.hero h2');
+  if(heading)heading.textContent='新規登録';
+  const description=$('.hero p');
+  if(description)description.remove();
+  const readButton=$('.hero>.primary');
+  if(readButton)readButton.replaceWith(createTreatmentActions('new'));
+  if(hero){
+    const progressFrame=document.createElement('section');
+    progressFrame.className='hero progress-frame';
+    progressFrame.innerHTML='<h2>途中経過</h2>';
+    progressFrame.append(createTreatmentActions('progress'));
+    hero.insertAdjacentElement('afterend',progressFrame);
+    if(state.image||state.images.length){if(state.workflowStage==='progress'&&state.treatmentType==='フェイシャル')showProgressFacialImagePreview();else if(state.workflowStage==='progress'&&state.treatmentType==='フット')showProgressFootImagePreview();else if(state.workflowStage==='progress'&&state.treatmentType==='ボディ')showProgressBodyImagePreview();else if(state.treatmentType==='フェイシャル')showSelectedFacialImagePreview();else if(state.treatmentType==='ボディ')showSelectedBodyImagePreview();else showSelectedImagePreview()}
+  }
+}
 function duration(seconds){const days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600),minutes=Math.floor(seconds%3600/60);return [days&&`${days}日`,hours&&`${hours}時間`,`${minutes}分`].filter(Boolean).join(' ')}
 async function renderAdmin(){const d=await api('/api/admin/operations');$('#content').innerHTML=`<section class="hero"><div><div class="eyebrow">SYSTEM STATUS</div><h2><span class="status-dot"></span>正常稼働中</h2><p>最終更新：${new Date(d.checkedAt).toLocaleString('ja-JP')}</p></div><button class="primary" onclick="show('admin')">↻ 運用状況を更新</button></section><div class="stats admin-stats"><div class="card stat"><div><small>サーバー稼働時間</small><b class="stat-text">${duration(d.uptimeSeconds)}</b></div><i>◷</i></div><div class="card stat"><div><small>データ保存</small><b class="stat-text">${esc(d.storage==='postgres'?'PostgreSQL':'ローカルJSON')}</b></div><i>▰</i></div><div class="card stat"><div><small>AI OCR</small><b class="stat-text">${d.ocrConfigured?'利用可能':'未設定'}</b></div><i>${d.ocrConfigured?'✓':'!'}</i></div></div><div class="admin-counts">${[['店舗',d.counts.tenants],['ユーザー',d.counts.users],['お客様',d.counts.customers],['カルテ',d.counts.records],['フォーム',d.counts.templates]].map(([label,value])=>`<div class="card admin-count"><small>${label}</small><b>${value}</b></div>`).join('')}</div><div class="section-head"><h2>店舗別の利用状況</h2><span class="badge">${esc(d.environment)} / ${esc(d.nodeVersion)}</span></div><div class="card admin-table"><div class="admin-row admin-row-head"><b>店舗</b><span>ユーザー</span><span>お客様</span><span>カルテ</span><span>フォーム</span></div>${d.tenantUsage.map(t=>`<div class="admin-row"><b>${esc(t.name)}</b><span>${t.users}</span><span>${t.customers}</span><span>${t.records}</span><span>${t.templates}</span></div>`).join('')}</div>`}
 async function renderAdminCustomers(){

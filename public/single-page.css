@@ -266,6 +266,8 @@
 }
 
 @media (max-width: 620px) {
+  input, select, textarea { font-size: 16px; }
+  .login-card { width: calc(100% - 32px); padding: 32px 24px; }
   .app header { padding: 13px 15px; gap: 8px; }
   .app-brand > span { font-size: 17px; }
   .app-brand small, .user-chip div { display: none; }

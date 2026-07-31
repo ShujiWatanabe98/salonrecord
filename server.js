@@ -465,7 +465,7 @@ function staticFile(res, pathname) {
   fs.readFile(file, (err, data) => { if (err) { res.writeHead(404); return res.end('Not found'); } const ext = path.extname(file); const types = { '.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml' }; const headers = { 'Content-Type': types[ext] || 'application/octet-stream' }; if (['.html','.css','.js'].includes(ext)) headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'; res.writeHead(200, headers); res.end(data); });
 }
 const server = http.createServer(async (req, res) => { try {
-  res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('X-Frame-Options', 'DENY'); res.setHeader('Referrer-Policy', 'no-referrer'); res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('X-Frame-Options', 'DENY'); res.setHeader('Referrer-Policy', 'no-referrer'); res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()');
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
   if (IS_PRODUCTION) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;

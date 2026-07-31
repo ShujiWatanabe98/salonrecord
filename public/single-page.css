@@ -148,6 +148,10 @@
 .chart-camera-progress span { padding: 5px 10px; border: 1px solid #6f7773; border-radius: 99px; color: #aeb6b2; font-size: 11px; }
 .chart-camera-progress span.current { border-color: #ef8ab0; color: #fff; background: #9c315a; }
 .chart-camera-progress span.done { border-color: #83c49d; color: #dff5e7; background: #356849; }
+.camera-live-status { margin: 0 0 10px; padding: 9px 12px; border: 1px solid #66706b; border-radius: 9px; text-align: center; font-size: 13px; font-weight: 700; }
+.camera-live-status.is-checking { color: #e8eef1; background: #263138; }
+.camera-live-status.is-valid { color: #dff5e7; border-color: #65a77f; background: #28523a; }
+.camera-live-status.is-warning { color: #ffe5de; border-color: #c77b6c; background: #63372f; }
 .chart-camera-video-wrap { position: relative; display: grid; place-items: center; width: 100%; height: min(68vh,680px); overflow: hidden; border-radius: 12px; background: #050606; }
 .chart-camera-video-wrap video { width: 100%; height: 100%; object-fit: cover; }
 .part-camera-video-wrap { height: min(70vh,680px); }

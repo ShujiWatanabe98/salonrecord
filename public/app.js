@@ -96,16 +96,39 @@ async function captureChartPhoto(type,stage){
   videoWrap.append(video,a4Frame);
   const actions=document.createElement('div');actions.className='chart-camera-actions';
   const cancel=document.createElement('button');cancel.type='button';cancel.className='ghost';cancel.textContent='キャンセル';
+  const switchCamera=document.createElement('button');switchCamera.type='button';switchCamera.className='ghost camera-switch';switchCamera.textContent='カメラ切替';
   const shutter=document.createElement('button');shutter.type='button';shutter.className='primary camera-shutter';shutter.textContent='撮影';
-  actions.append(cancel,shutter);dialog.append(title,guide,progress,videoWrap,actions);document.body.append(dialog);
+  actions.append(cancel,switchCamera,shutter);dialog.append(title,guide,progress,videoWrap,actions);document.body.append(dialog);
   const updateGuide=()=>{guide.textContent=requiredPages===2?`${captured.length+1}枚目／2枚：${captured.length===0?'カウンセリングシート1ページ目':'同意・図示の2ページ目'}を撮影してください`:'途中経過シートをA4枠内に合わせて撮影してください';progress.innerHTML=Array.from({length:requiredPages},(_,index)=>`<span class="${index<captured.length?'done':index===captured.length?'current':''}">${index+1}枚目</span>`).join('')};
-  let stream=null;const stopCamera=()=>{stream?.getTracks().forEach(track=>track.stop());stream=null};
+  let stream=null,facingMode='environment';const stopCamera=()=>{stream?.getTracks().forEach(track=>track.stop());stream=null};
+  const startCamera=async()=>{stopCamera();try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facingMode},width:{ideal:1920},height:{ideal:1080}},audio:false})}catch{stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false})}video.srcObject=stream;await video.play()};
   cancel.onclick=()=>dialog.close();dialog.onclose=()=>{stopCamera();dialog.remove()};updateGuide();dialog.showModal();
-  try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});video.srcObject=stream;await video.play()}
+  switchCamera.onclick=async()=>{facingMode=facingMode==='environment'?'user':'environment';switchCamera.disabled=true;try{await startCamera()}catch{toast('別のカメラへ切り替えられませんでした')}finally{switchCamera.disabled=false}};
+  try{if(!navigator.mediaDevices?.getUserMedia)throw new Error('camera unavailable');await startCamera()}
   catch(error){dialog.close();toast('カメラを起動できないため、画像ファイル選択へ切り替えます');cameraFilePicker(image=>{state.treatmentType=type;state.workflowStage=stage;state.images=[image];state.image=image;state.scan=null;showOcrFormForSelectedButton()});return}
   shutter.onclick=()=>{if(!video.videoWidth||!video.videoHeight){toast('カメラの準備中です');return}const scale=Math.min(1,2000/Math.max(video.videoWidth,video.videoHeight));const canvas=document.createElement('canvas');canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);canvas.getContext('2d',{alpha:false}).drawImage(video,0,0,canvas.width,canvas.height);captured.push(canvas.toDataURL('image/jpeg',.82));if(captured.length<requiredPages){updateGuide();shutter.textContent='2枚目を撮影';return}state.treatmentType=type;state.workflowStage=stage;state.images=captured;state.image=captured[0];state.scan=null;dialog.close();showOcrFormForSelectedButton()};
 }
-function capturePartPhoto(stage){cameraFilePicker(image=>{state.partImages[stage]=image;showPartPhotoPreview(stage,image)})}
+async function capturePartPhoto(stage){
+  document.querySelector('.part-camera-dialog')?.remove();
+  const dialog=document.createElement('dialog');dialog.className='chart-camera-dialog part-camera-dialog';
+  const title=document.createElement('h3');title.textContent='施術部位を撮影';
+  const guide=document.createElement('p');guide.className='chart-camera-guide';guide.textContent='記録する施術部位を画面中央に合わせて撮影してください';
+  const videoWrap=document.createElement('div');videoWrap.className='chart-camera-video-wrap part-camera-video-wrap';
+  const video=document.createElement('video');video.autoplay=true;video.playsInline=true;video.muted=true;videoWrap.append(video);
+  const actions=document.createElement('div');actions.className='chart-camera-actions';
+  const cancel=document.createElement('button');cancel.type='button';cancel.className='ghost';cancel.textContent='キャンセル';
+  const switchCamera=document.createElement('button');switchCamera.type='button';switchCamera.className='ghost camera-switch';switchCamera.textContent='カメラ切替';
+  const shutter=document.createElement('button');shutter.type='button';shutter.className='primary camera-shutter';shutter.textContent='撮影';
+  actions.append(cancel,switchCamera,shutter);dialog.append(title,guide,videoWrap,actions);document.body.append(dialog);
+  let stream=null,facingMode='environment';
+  const stopCamera=()=>{stream?.getTracks().forEach(track=>track.stop());stream=null};
+  const startCamera=async()=>{stopCamera();try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facingMode},width:{ideal:1920},height:{ideal:1080}},audio:false})}catch{stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false})}video.srcObject=stream;await video.play()};
+  cancel.onclick=()=>dialog.close();dialog.onclose=()=>{stopCamera();dialog.remove()};
+  switchCamera.onclick=async()=>{facingMode=facingMode==='environment'?'user':'environment';switchCamera.disabled=true;try{await startCamera()}catch{toast('別のカメラへ切り替えられませんでした')}finally{switchCamera.disabled=false}};
+  shutter.onclick=()=>{if(!video.videoWidth||!video.videoHeight){toast('カメラの準備中です');return}const scale=Math.min(1,2000/Math.max(video.videoWidth,video.videoHeight));const canvas=document.createElement('canvas');canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);canvas.getContext('2d',{alpha:false}).drawImage(video,0,0,canvas.width,canvas.height);const image=canvas.toDataURL('image/jpeg',.82);state.partImages[stage]=image;dialog.close();showPartPhotoPreview(stage,image)};
+  dialog.showModal();
+  try{if(!navigator.mediaDevices?.getUserMedia)throw new Error('camera unavailable');await startCamera()}catch{dialog.close();toast('カメラを起動できないため、画像選択へ切り替えます');cameraFilePicker(image=>{state.partImages[stage]=image;showPartPhotoPreview(stage,image)})}
+}
 function imagesForRecord(stage=state.workflowStage){
   const chartImages=(state.images.length?state.images:[state.image]).filter(Boolean);
   const partImage=state.partImages?.[stage];

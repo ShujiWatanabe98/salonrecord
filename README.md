@@ -1,4 +1,4 @@
-# SalonRecord
+# LyconSalonRecord
 
 手書きのサロンカルテをAI OCRで読み取り、店舗単位で顧客・施術履歴・注意事項を管理するWebアプリです。ローカルではJSON、本番ではPostgreSQLへ自動的に切り替わります。
 
@@ -37,7 +37,7 @@ APIキーがなくても「サンプルで試す」で読取後の確認・保�
 ```powershell
 cd "C:\Users\Shuji Watanabe\salonrecord"
 git add .
-git commit -m "Prepare SalonRecord for Render"
+git commit -m "Prepare LyconSalonRecord for Render"
 git push
 ```
 

@@ -6,4 +6,4 @@ OCRおよびフォーム設定の検証用に作成した、架空3社の未記�
 2. `02_silhouette_body_chart.svg`：痩身・ボディエステ向け
 3. `03_harmony_total_beauty_chart.svg`：総合美容サロン向け
 
-SVGは1240×1754px（A判相当）です。ブラウザで開いて印刷、またはPNGへ変換してSalonRecordのOCR入力に利用できます。
+SVGは1240×1754px（A判相当）です。ブラウザで開いて印刷、またはPNGへ変換してLyconSalonRecordのOCR入力に利用できます。

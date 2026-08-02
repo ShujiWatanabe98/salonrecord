@@ -55,3 +55,25 @@ header { background: #fff; border-bottom-color: #ebebeb; }
 .zone.selected { border-color: #e31c79; background: #e31c7928; }
 .field-item.selected { border-color: #cc455e; background: #fff6f8; }
 .toast { background: #424242; border-left: 4px solid #e31c79; }
+
+/* お客様履歴は10件分を表示し、続きは枠内でスクロールする。 */
+.customer-history-scroll {
+  max-height: 774px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.language-switch { position: fixed; z-index: 1000; top: 10px; right: 14px; display: flex; gap: 4px; padding: 4px; border: 1px solid #e7c9d0; border-radius: 10px; background: #fff; box-shadow: 0 4px 18px #42424218; }
+.language-switch button { border: 0; border-radius: 7px; padding: 6px 10px; background: transparent; color: #767676; font-weight: 700; }
+.language-switch button.active { background: #cc455e; color: #fff; }
+body:has(#app:not(.hidden)) .language-switch { top: 22px; right: 220px; }
+@media (max-width: 620px) { body:has(#app:not(.hidden)) .language-switch { top: 62px; right: 12px; } }
+.treatment-summary{margin-bottom:16px;border-left:4px solid var(--pink,#e31c79)}
+.treatment-summary h3{margin-top:0}
+#treatmentSummaryText{width:100%;box-sizing:border-box;line-height:1.65;resize:vertical}
+.summary-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:10px}
+#treatmentSummaryText h4{margin:14px 0 5px;color:#424242}
+#treatmentSummaryText h4:first-child{margin-top:0}
+#treatmentSummaryText ul{margin:0 0 8px;padding-left:22px}
+#treatmentSummaryText p{margin:5px 0}

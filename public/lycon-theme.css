@@ -56,17 +56,24 @@ header { background: #fff; border-bottom-color: #ebebeb; }
 .field-item.selected { border-color: #cc455e; background: #fff6f8; }
 .toast { background: #424242; border-left: 4px solid #e31c79; }
 
-/* お客様履歴は10件分を表示し、続きは枠内でスクロールする。 */
+/* お客様履歴は6人分を表示し、7人目以降は枠内でスクロールする。 */
 .customer-history-scroll {
-  max-height: 774px;
+  max-height: 464px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
 
-.language-switch { position: fixed; z-index: 1000; top: 10px; right: 14px; display: flex; gap: 4px; padding: 4px; border: 1px solid #e7c9d0; border-radius: 10px; background: #fff; box-shadow: 0 4px 18px #42424218; }
-.language-switch button { border: 0; border-radius: 7px; padding: 6px 10px; background: transparent; color: #767676; font-weight: 700; }
-.language-switch button.active { background: #cc455e; color: #fff; }
+.scan-patient-selector { margin-bottom: 18px; padding: 16px 22px; }
+.scan-patient-selector label { display: grid; grid-template-columns: 130px minmax(240px, 520px); align-items: center; gap: 14px; margin: 0; }
+.scan-patient-selector select { width: 100%; }
+@media (max-width: 620px) { .scan-patient-selector label { grid-template-columns: 1fr; gap: 7px; } }
+
+.language-switch { position: fixed; z-index: 1000; top: 10px; right: 14px; display: grid; grid-template-columns: 1fr 1fr; width: 184px; padding: 4px; border: 1px solid #e7c9d0; border-radius: 999px; background: #fff; box-shadow: 0 4px 18px #42424218; isolation: isolate; }
+.language-switch::before { content: ""; position: absolute; z-index: -1; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px); border-radius: 999px; background: #cc455e; box-shadow: 0 2px 8px #b7355038; transition: transform .24s ease; }
+.language-switch:has(button[data-language="en"].active)::before { transform: translateX(100%); }
+.language-switch button { border: 0; border-radius: 999px; padding: 7px 10px; background: transparent; color: #767676; font-weight: 700; transition: color .24s ease; }
+.language-switch button.active { color: #fff; }
 body:has(#app:not(.hidden)) .language-switch { top: 22px; right: 220px; }
 @media (max-width: 620px) { body:has(#app:not(.hidden)) .language-switch { top: 62px; right: 12px; } }
 .treatment-summary{margin-bottom:16px;border-left:4px solid var(--pink,#e31c79)}

@@ -553,3 +553,17 @@ main ul, main ol { list-style: none !important; padding-left: 0 !important; }
   .dropzone { min-height: 300px; }
   .toast { right: 10px; bottom: 10px; left: 10px; text-align: center; }
 }
+
+/* Keep the language control attached to the physical mobile viewport. This
+   final override intentionally wins over every theme and authenticated state. */
+@media (max-width: 620px) {
+  html .language-switch,
+  body:has(#app:not(.hidden)) .language-switch {
+    position: fixed !important;
+    inset: 0 auto auto calc(50% - 78px) !important;
+    width: 156px !important;
+    margin: 0 !important;
+    transform: none !important;
+    z-index: 2147483647 !important;
+  }
+}

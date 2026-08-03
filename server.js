@@ -330,6 +330,24 @@ async function api(req, res, pathname) {
       tenantUsage
     });
   }
+  if (pathname === '/api/admin/customer-data' && req.method === 'GET') {
+    if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
+    return json(res, 200, {
+      exportedAt: new Date().toISOString(),
+      customers: structuredClone(db.customers),
+      records: structuredClone(db.records)
+    });
+  }
+  if (pathname === '/api/admin/customer-data' && req.method === 'DELETE') {
+    if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
+    const b = await body(req);
+    if (b.confirm !== 'DELETE_ALL_CUSTOMER_DATA') return json(res, 400, { error: '全削除の確認文字列が一致しません' });
+    const deleted = { customers: db.customers.length, records: db.records.length };
+    db.customers = [];
+    db.records = [];
+    await save();
+    return json(res, 200, { deleted, remaining: { customers: 0, records: 0 } });
+  }
   if (pathname === '/api/admin/tenants' && req.method === 'POST') {
     if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
     const b = await body(req);

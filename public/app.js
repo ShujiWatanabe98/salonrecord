@@ -136,7 +136,7 @@ function createTreatmentActions(stage='new'){
 }
 function createCameraActions(stage='new'){
   const actions=document.createElement('div');actions.className='camera-actions';
-  const treatmentButton=document.createElement('button');treatmentButton.type='button';treatmentButton.className='ghost treatment-entry-button';treatmentButton.textContent='施術入力';treatmentButton.onclick=()=>openTreatmentEntryForm('',actions.closest('.hero'));
+  const treatmentButton=document.createElement('button');treatmentButton.type='button';treatmentButton.className='ghost treatment-entry-button';treatmentButton.innerHTML='<span>施術入力</span>';treatmentButton.setAttribute('aria-label','施術入力');treatmentButton.onclick=()=>openTreatmentEntryForm('',actions.closest('.hero'));
   const cameraButton=document.createElement('button');cameraButton.type='button';cameraButton.className='ghost camera-chart-button';cameraButton.textContent='カメラ';cameraButton.onclick=()=>captureChartPhoto(stage);
   const fileButton=document.createElement('button');fileButton.type='button';fileButton.className='ghost camera-file-button';fileButton.textContent='ファイルを開く';fileButton.onclick=()=>openChartFiles(stage);
   actions.append(treatmentButton,cameraButton,fileButton);return actions;
@@ -529,7 +529,7 @@ async function setupDashboardPatientSearch(sectionHead){
   const resultCard=sectionHead.nextElementSibling;
   if(!resultCard)return;
   resultCard.classList.add('customer-history-scroll');
-  const addTreatmentEntryButtons=()=>resultCard.querySelectorAll('.history-record-row').forEach(row=>{const historyButton=row.querySelector('.detail-button-active[data-customer-id]');if(!historyButton||row.querySelector('.treatment-entry-row-button'))return;const entryButton=document.createElement('button');entryButton.type='button';entryButton.className='ghost treatment-entry-row-button';entryButton.textContent='施術入力';entryButton.onclick=()=>openTreatmentEntryForm(historyButton.dataset.customerId,$('.hero'));historyButton.insertAdjacentElement('beforebegin',entryButton)});
+  const addTreatmentEntryButtons=()=>resultCard.querySelectorAll('.history-record-row').forEach(row=>{const historyButton=row.querySelector('.detail-button-active[data-customer-id]');if(!historyButton||row.querySelector('.treatment-entry-row-button'))return;const entryButton=document.createElement('button');entryButton.type='button';entryButton.className='ghost treatment-entry-row-button';entryButton.innerHTML='<span>施術入力</span>';entryButton.setAttribute('aria-label','施術入力');entryButton.onclick=()=>openTreatmentEntryForm(historyButton.dataset.customerId,$('.hero'));historyButton.insertAdjacentElement('beforebegin',entryButton)});
   new MutationObserver(addTreatmentEntryButtons).observe(resultCard,{childList:true});
   const oldAction=sectionHead.querySelector('button');
   const searchFields=document.createElement('div');searchFields.className='patient-search-fields';

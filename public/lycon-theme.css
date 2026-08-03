@@ -69,15 +69,15 @@ header { background: #fff; border-bottom-color: #ebebeb; }
 .scan-patient-selector select { width: 100%; }
 @media (max-width: 620px) { .scan-patient-selector label { grid-template-columns: 1fr; gap: 7px; } }
 
-.language-switch { position: fixed; z-index: 1000; top: 10px; right: 14px; display: grid; grid-template-columns: 1fr 1fr; width: 184px; padding: 4px; border: 1px solid #e7c9d0; border-radius: 999px; background: #fff; box-shadow: 0 4px 18px #42424218; isolation: isolate; }
+.language-switch { position: fixed; z-index: 1000; top: max(6px, env(safe-area-inset-top)); left: 50%; right: auto; transform: translateX(-50%); display: grid; grid-template-columns: 1fr 1fr; width: 184px; padding: 4px; border: 1px solid #e7c9d0; border-radius: 999px; background: #fff; box-shadow: 0 4px 18px #42424218; isolation: isolate; }
 .language-switch::before { content: ""; position: absolute; z-index: -1; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px); border-radius: 999px; background: #cc455e; box-shadow: 0 2px 8px #b7355038; transition: transform .24s ease; }
 .language-switch:has(button[data-language="en"].active)::before { transform: translateX(100%); }
 .language-switch button { border: 0; border-radius: 999px; padding: 7px 10px; background: transparent; color: #767676; font-weight: 700; transition: color .24s ease; }
 .language-switch button.active { color: #fff; }
-body:has(#app:not(.hidden)) .language-switch { top: 22px; right: 220px; }
+body:has(#app:not(.hidden)) .language-switch { top: max(6px, env(safe-area-inset-top)); left: 50%; right: auto; }
 @media (max-width: 620px) {
-  .language-switch { top: 10px; right: 10px; width: 156px; box-shadow: 0 3px 12px #42424214; }
-  body:has(#app:not(.hidden)) .language-switch { top: 11px; right: 88px; width: 146px; }
+  .language-switch { top: max(4px, env(safe-area-inset-top)); left: 50%; right: auto; width: 156px; box-shadow: 0 3px 12px #42424214; }
+  body:has(#app:not(.hidden)) .language-switch { top: max(4px, env(safe-area-inset-top)); left: 50%; right: auto; width: 146px; }
   .language-switch button { min-height: 44px; padding: 6px 7px; font-size: 12px; }
 }
 .treatment-summary{margin-bottom:16px;border-left:4px solid var(--pink,#e31c79)}

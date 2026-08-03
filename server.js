@@ -422,8 +422,43 @@ async function api(req, res, pathname) {
   }
   const adminTenantMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)$/);
   const adminTenantCustomerMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)\/customers$/);
+  const adminTenantCustomerDatasetMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)\/customer-dataset$/);
   const adminTenantCustomerDeleteMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)\/customers\/([^/]+)$/);
   const adminTenantGenderBackfillMatch = pathname.match(/^\/api\/admin\/tenants\/([^/]+)\/backfill-gender$/);
+  if (adminTenantCustomerDatasetMatch && req.method === 'POST') {
+    if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
+    const tenantId = decodeURIComponent(adminTenantCustomerDatasetMatch[1]);
+    const tenant = db.tenants.find(row => row.id === tenantId);
+    if (!tenant) return json(res, 404, { error: '店舗が見つかりません' });
+    const b = await body(req);
+    if (b.confirm !== 'CREATE_PERSONA_CUSTOMERS') return json(res, 400, { error: '確認文字列が一致しません' });
+    if (!Array.isArray(b.customers) || b.customers.length !== 12) return json(res, 400, { error: 'お客様データは12名分必要です' });
+    if (db.customers.some(row => row.tenantId === tenantId) || db.records.some(row => row.tenantId === tenantId)) return json(res, 409, { error: '対象店舗には既にお客様または施術履歴があります' });
+    const femaleCount = b.customers.filter(row => row?.gender === 'female').length;
+    const maleCount = b.customers.filter(row => row?.gender === 'male').length;
+    if (femaleCount !== 10 || maleCount !== 2) return json(res, 400, { error: '性別構成は女性10名、男性2名にしてください' });
+    const now = new Date().toISOString();
+    const createdCustomers = [], createdRecords = [];
+    for (const source of b.customers) {
+      const name = String(source?.name || '').trim();
+      const records = Array.isArray(source?.records) ? source.records : [];
+      if (!name || !records.length || records[0]?.recordType !== 'registration_sheet' || records.slice(1).some(record => record?.recordType !== 'treatment_entry')) return json(res, 400, { error: `${name || '名称未設定'}の履歴構成が不正です` });
+      const customer = {
+        id: id('c'), tenantId, name, kana: String(source.kana || '').trim(), phone: String(source.phone || '').trim(), gender: source.gender,
+        lastVisit: String(records.at(-1).visitDate || records[0].visitDate || ''), alerts: Array.isArray(source.alerts) ? source.alerts : [],
+        preferences: Array.isArray(source.preferences) ? source.preferences : [], billingTier: 'free', sample: true
+      };
+      createdCustomers.push(customer);
+      for (const sourceRecord of records) createdRecords.push({
+        id: id('r'), tenantId, customerId: customer.id, visitDate: String(sourceRecord.visitDate || now.slice(0, 10)),
+        staff: String(sourceRecord.staff || '佐藤 あい'), templateId: sourceRecord.templateId || db.templates.find(row => row.tenantId === tenantId)?.id || '',
+        chartGender: customer.gender, recordType: sourceRecord.recordType, values: sourceRecord.values && typeof sourceRecord.values === 'object' ? sourceRecord.values : {},
+        alerts: Array.isArray(sourceRecord.alerts) ? sourceRecord.alerts : [], note: String(sourceRecord.note || ''), images: [], createdAt: now
+      });
+    }
+    db.customers.push(...createdCustomers); db.records.push(...createdRecords); await save();
+    return json(res, 201, { tenantId, customers: createdCustomers.length, records: createdRecords.length, registrationSheets: createdRecords.filter(row => row.recordType === 'registration_sheet').length, treatmentEntries: createdRecords.filter(row => row.recordType === 'treatment_entry').length, gender: { female: femaleCount, male: maleCount } });
+  }
   if (adminTenantGenderBackfillMatch && req.method === 'POST') {
     if (user.role !== 'system_admin') return json(res, 403, { error: 'システム管理者権限が必要です' });
     const tenantId = decodeURIComponent(adminTenantGenderBackfillMatch[1]);
@@ -609,7 +644,7 @@ async function api(req, res, pathname) {
       .sort((a, b) => String(b.visitDate || '').localeCompare(String(a.visitDate || '')));
     return json(res, 200, records);
   }
-  if (pathname === '/api/records' && req.method === 'POST') { const b = await body(req); const customer = tenantRows('customers', user).find(c => c.id === b.customerId); if (!customer) return json(res, 400, { error: '顧客を選択してください' }); const images = (Array.isArray(b.images) ? b.images : [b.image]).filter(image => /^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(String(image || ''))).slice(0, 3); if (images.some(image => image.length > 4_000_000)) return json(res, 413, { error: '1枚あたりの画像容量が大きすぎます。撮影または選択し直してください' }); const chartGender = ['male', 'female', 'common'].includes(b.chartGender) ? b.chartGender : ''; const row = { id: id('r'), tenantId: user.tenantId, customerId: customer.id, visitDate: b.visitDate || new Date().toISOString().slice(0,10), staff: user.name, templateId: b.templateId, chartGender, values: b.values || {}, alerts: b.alerts || [], note: b.note || '', images, createdAt: new Date().toISOString() }; db.records.push(row); customer.lastVisit = row.visitDate; if (['male', 'female'].includes(chartGender) && !customer.gender) customer.gender = chartGender; customer.alerts = [...new Set([...(customer.alerts || []), ...row.alerts])]; await save(); return json(res, 201, row); }
+  if (pathname === '/api/records' && req.method === 'POST') { const b = await body(req); const customer = tenantRows('customers', user).find(c => c.id === b.customerId); if (!customer) return json(res, 400, { error: '顧客を選択してください' }); const images = (Array.isArray(b.images) ? b.images : [b.image]).filter(image => /^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(String(image || ''))).slice(0, 3); if (images.some(image => image.length > 4_000_000)) return json(res, 413, { error: '1枚あたりの画像容量が大きすぎます。撮影または選択し直してください' }); const chartGender = ['male', 'female', 'common'].includes(b.chartGender) ? b.chartGender : ''; const recordType = ['registration_sheet', 'treatment_entry'].includes(b.recordType) ? b.recordType : (db.records.some(record => record.customerId === customer.id) ? 'treatment_entry' : 'registration_sheet'); const row = { id: id('r'), tenantId: user.tenantId, customerId: customer.id, visitDate: b.visitDate || new Date().toISOString().slice(0,10), staff: user.name, templateId: b.templateId, chartGender, recordType, values: b.values || {}, alerts: b.alerts || [], note: b.note || '', images, createdAt: new Date().toISOString() }; db.records.push(row); customer.lastVisit = row.visitDate; if (['male', 'female'].includes(chartGender) && !customer.gender) customer.gender = chartGender; customer.alerts = [...new Set([...(customer.alerts || []), ...row.alerts])]; await save(); return json(res, 201, row); }
   return json(res, 404, { error: 'APIが見つかりません' });
 }
 

@@ -190,14 +190,17 @@
 .treatment-suggestions > small { display: block; margin-bottom: 6px; color: #8d4057; font-weight: 800; }
 .treatment-suggestion-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
 .treatment-suggestion-chip { border: 1px solid #dcaaba; border-radius: 999px; padding: 7px 10px; background: #fff; color: #8d4057; font-size: 12px; font-weight: 700; text-align: left; }
-.treatment-suggestion-chip:hover,.treatment-suggestion-chip.selected { border-color: #cc455e; background: #cc455e; color: #fff; }
+.treatment-suggestion-chip { transition: opacity .1s ease, transform .1s ease, border-color .1s ease, background-color .1s ease; }
+.treatment-suggestion-chip:hover { border-color: #dcaaba; background: #fff8fa; color: #8d4057; }
+.treatment-suggestion-chip:focus-visible { outline: 2px solid #cc455e; outline-offset: 2px; }
+.treatment-suggestion-chip.is-removing { opacity: 0; transform: translateY(-3px); pointer-events: none; }
 .digital-cell:has(> .retail-history-suggestions) { display: grid; grid-template-rows: 58px auto; align-content: start; }
 .digital-cell:has(> .retail-history-suggestions) > input { height: 58px; }
 .retail-history-suggestions { border-top: 1px solid #edc8d2; }
 .retail-product-suggestions { border-top: 1px solid #ead7b6; background: #fffaf2 !important; }
 .retail-product-suggestions > small { color: #76531f; }
 .retail-product-suggestions .treatment-suggestion-chip { border-color: #d5b374; background: #fffdf7; color: #66481b; }
-.retail-product-suggestions .treatment-suggestion-chip:hover { border-color: #cc455e; color: #fff; }
+.retail-product-suggestions .treatment-suggestion-chip:hover { border-color: #d5b374; background: #fff8e9; color: #66481b; }
 .digital-face-cell { grid-column: 3 / 5; grid-row: 2; position: relative; display: grid; grid-template-rows: auto 1fr auto; place-items: center; padding: 10px; overflow: hidden; }
 .digital-face-toolbar { width: 100%; display: flex; justify-content: space-between; align-items: center; }
 .digital-face-toolbar .ghost { padding: 6px 9px; font-size: 11px; }
@@ -361,10 +364,10 @@
   background: #fff;
   color: #84374e;
 }
-.digital-treatment-entry .treatment-suggestion-chip:hover,
-.digital-treatment-entry .treatment-suggestion-chip.selected {
-  border-color: var(--treatment-pink);
-  background: linear-gradient(135deg, var(--treatment-rose), var(--treatment-pink));
+.digital-treatment-entry .treatment-suggestion-chip:hover {
+  border-color: #e5b6c3;
+  background: #fff8fa;
+  color: #84374e;
 }
 .digital-treatment-entry .foot-treatment-title {
   padding: 9px 14px;

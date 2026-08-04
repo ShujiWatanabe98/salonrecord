@@ -240,6 +240,156 @@
   .treatment-entry-actions { position: sticky; z-index: 8; bottom: 0; margin: 14px -13px -18px; padding: 10px 13px; border-top: 1px solid var(--line); background: rgba(255,255,255,.96); }
   .treatment-entry-actions button { flex: 1; min-height: 46px; }
 }
+
+/* LYCON treatment record: softer salon styling with clear pink accents. */
+.digital-treatment-entry {
+  --treatment-charcoal: #424242;
+  --treatment-rose: #cc455e;
+  --treatment-pink: #e31c79;
+  --treatment-blush: #fff4f7;
+  --treatment-line: #edc8d2;
+}
+.digital-treatment-entry .treatment-entry-heading {
+  position: relative;
+  padding: 18px 20px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 16px 16px 0 0;
+  background: linear-gradient(110deg, var(--treatment-charcoal) 0 62%, #5a3c47 100%);
+  color: #fff;
+}
+.digital-treatment-entry .treatment-entry-heading::after {
+  content: '';
+  position: absolute;
+  right: 72px;
+  bottom: -30px;
+  width: 150px;
+  height: 70px;
+  border: 14px solid rgba(227, 28, 121, .7);
+  border-radius: 50%;
+  transform: rotate(-12deg);
+}
+.digital-treatment-entry .treatment-entry-heading small { color: #ffadca; }
+.digital-treatment-entry .treatment-entry-heading h2 { color: #fff; letter-spacing: .04em; }
+.digital-treatment-entry .treatment-entry-close {
+  position: relative;
+  z-index: 1;
+  border-color: rgba(255,255,255,.48);
+  background: rgba(255,255,255,.1);
+  color: #fff;
+}
+.digital-treatment-entry .facial-customer-row {
+  max-width: none;
+  padding: 16px 18px;
+  border: 1px solid var(--treatment-line);
+  border-radius: 0 0 14px 14px;
+  background: linear-gradient(90deg, var(--treatment-blush), #fff);
+}
+.digital-treatment-entry .facial-customer-row label { color: #7c3349; font-weight: 800; }
+.digital-treatment-entry .facial-customer-row select {
+  margin-top: 7px;
+  border-color: #dcaaba;
+  background-color: #fff;
+}
+.digital-treatment-entry .digital-treatment-sheet {
+  gap: 1px;
+  border: 1px solid #d89bad;
+  border-top: 5px solid var(--treatment-pink);
+  border-radius: 14px;
+  background: var(--treatment-line);
+  box-shadow: 0 12px 28px rgba(107, 50, 69, .1);
+}
+.digital-treatment-entry .digital-cell { background: #fffdfd; }
+.digital-treatment-entry .digital-label {
+  position: relative;
+  color: #713247;
+  background: linear-gradient(145deg, #fff7f9, #fce5eb);
+  font-size: 13px;
+  letter-spacing: .04em;
+}
+.digital-treatment-entry .digital-label::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 0;
+  width: 4px;
+  border-radius: 0 4px 4px 0;
+  background: var(--treatment-rose);
+}
+.digital-treatment-entry .digital-main-label {
+  color: #fff;
+  background: linear-gradient(180deg, var(--treatment-charcoal), #5e414b);
+}
+.digital-treatment-entry .digital-main-label::before { background: var(--treatment-pink); }
+.digital-treatment-entry .digital-cell input,
+.digital-treatment-entry .digital-cell textarea {
+  color: var(--treatment-charcoal);
+  background: #fffdfd;
+}
+.digital-treatment-entry .digital-cell input:hover,
+.digital-treatment-entry .digital-cell textarea:hover { background: #fff8fa; }
+.digital-treatment-entry .digital-cell input:focus,
+.digital-treatment-entry .digital-cell textarea:focus {
+  background: #fff;
+  box-shadow: inset 0 0 0 3px rgba(227, 28, 121, .42);
+}
+.digital-treatment-entry .digital-face-cell {
+  background: radial-gradient(circle at 50% 48%, #fff 0 58%, #fff3f6 100%);
+}
+.digital-treatment-entry .digital-face-toolbar {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--treatment-line);
+  color: #79354a;
+}
+.digital-treatment-entry .digital-face-toolbar b::before {
+  content: 'LYCON  ';
+  color: var(--treatment-pink);
+  font-size: 10px;
+  letter-spacing: .12em;
+}
+.digital-treatment-entry .treatment-suggestions { background: var(--treatment-blush); }
+.digital-treatment-entry .treatment-suggestion-chip {
+  border-color: #e5b6c3;
+  background: #fff;
+  color: #84374e;
+}
+.digital-treatment-entry .treatment-suggestion-chip:hover,
+.digital-treatment-entry .treatment-suggestion-chip.selected {
+  border-color: var(--treatment-pink);
+  background: linear-gradient(135deg, var(--treatment-rose), var(--treatment-pink));
+}
+.digital-treatment-entry .foot-treatment-title {
+  padding: 9px 14px;
+  border-left: 5px solid var(--treatment-pink);
+  border-radius: 0 10px 10px 0;
+  background: linear-gradient(90deg, #fde4eb, transparent);
+  color: #703247;
+  letter-spacing: .04em;
+}
+.digital-treatment-entry .treatment-entry-actions {
+  padding-top: 16px;
+  border-top-color: var(--treatment-line);
+}
+.digital-treatment-entry .treatment-entry-actions .primary {
+  border-color: var(--treatment-pink);
+  background: linear-gradient(135deg, var(--treatment-rose), var(--treatment-pink));
+  box-shadow: 0 7px 16px rgba(204, 69, 94, .24);
+}
+
+@media (max-width: 620px) {
+  .digital-treatment-entry .treatment-entry-heading {
+    margin: 0;
+    padding: 11px 10px;
+    border-radius: 12px 12px 0 0;
+    background: var(--treatment-charcoal);
+  }
+  .digital-treatment-entry .treatment-entry-heading::after { right: 52px; opacity: .55; }
+  .digital-treatment-entry .facial-customer-row { margin-top: 0; padding: 12px 10px; }
+  .digital-treatment-entry .digital-treatment-sheet { border-top-width: 4px; }
+  .digital-treatment-entry .digital-label { font-size: 11px; }
+  .digital-treatment-entry .digital-label::before { top: 7px; bottom: 7px; width: 3px; }
+}
 .digital-face-cell small { color: var(--muted); font-size: 11px; }
 .digital-treatment-sheet > :nth-child(8) { grid-column: 1; grid-row: 3; }
 .digital-comment { grid-column: 2; grid-row: 3; }
@@ -700,5 +850,195 @@ main ul, main ol { list-style: none !important; padding-left: 0 !important; }
     font-size: 14px !important;
     line-height: 1.2 !important;
     white-space: nowrap !important;
+  }
+}
+
+/* Device-specific LYCON treatment sheets. */
+@media (min-width: 621px) and (max-width: 1024px) {
+  .patient-search-head { align-items: stretch; flex-direction: column; }
+  .patient-search-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    margin-left: 0;
+  }
+  .patient-search-input,
+  .patient-gender-filter { width: 100%; }
+  .treatment-entry-dialog {
+    width: calc(100% - 24px);
+    margin: 12px;
+    border-radius: 16px;
+  }
+  .digital-treatment-entry { padding: 20px; }
+  .digital-treatment-entry .treatment-entry-heading { padding: 16px 18px; }
+  .digital-treatment-entry .facial-customer-row {
+    grid-template-columns: minmax(280px, 1fr);
+    margin: 14px 0;
+    padding: 14px;
+  }
+  .digital-treatment-entry .digital-treatment-sheet {
+    grid-template-columns: 88px minmax(180px, 1fr) 88px minmax(170px, .85fr);
+    grid-template-rows: 58px minmax(340px, auto) 92px 58px;
+    min-width: 0;
+    width: 100%;
+    border-radius: 13px;
+  }
+  .digital-treatment-entry .digital-label { padding: 8px 6px; font-size: 12px; }
+  .digital-treatment-entry .digital-cell input,
+  .digital-treatment-entry .digital-cell textarea { padding: 11px; font-size: 15px; }
+  .digital-treatment-entry .digital-face-cell { padding: 9px; }
+  .digital-treatment-entry .lycon-face-diagram,
+  .digital-treatment-entry .lycon-foot-diagram,
+  .digital-treatment-entry .lycon-body-diagram { width: min(94%, 260px); height: 275px; }
+  .digital-treatment-entry .digital-face-canvas,
+  .digital-treatment-entry .digital-foot-canvas,
+  .digital-treatment-entry .digital-body-canvas { width: min(94%, 260px); height: 275px; }
+  .digital-treatment-entry .treatment-suggestion-buttons { gap: 5px; }
+  .digital-treatment-entry .treatment-suggestion-chip { padding: 6px 8px; font-size: 11px; }
+  .digital-treatment-entry .foot-treatment-title { margin-top: 24px; }
+  .digital-treatment-entry .treatment-entry-actions button { min-width: 150px; min-height: 48px; }
+}
+
+@media (max-width: 620px) {
+  .treatment-entry-dialog {
+    width: calc(100% - 12px);
+    margin: 6px;
+    border-radius: 14px;
+  }
+  .digital-treatment-entry {
+    padding: 8px 8px 18px;
+    overflow-x: visible;
+  }
+  .digital-treatment-entry .treatment-entry-heading {
+    top: 50px;
+    margin: 0;
+    padding: 12px 10px;
+    border-radius: 12px 12px 0 0;
+  }
+  .digital-treatment-entry .treatment-entry-heading::after {
+    right: 44px;
+    width: 105px;
+    height: 56px;
+  }
+  .digital-treatment-entry .treatment-entry-heading h2 { font-size: 18px; }
+  .digital-treatment-entry .facial-customer-row {
+    margin: 0 0 12px;
+    padding: 12px 10px;
+    border-radius: 0 0 12px 12px;
+  }
+  .digital-treatment-entry .digital-treatment-sheet {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    gap: 0;
+    min-width: 0;
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid #e4b2c0;
+    border-top: 5px solid var(--treatment-pink);
+    border-radius: 13px;
+    background: #fff;
+    box-shadow: 0 8px 20px rgba(107, 50, 69, .1);
+  }
+  .digital-treatment-entry .digital-treatment-sheet > *,
+  .digital-treatment-entry .digital-treatment-sheet > :nth-child(n) {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+  }
+  .digital-treatment-entry .digital-label {
+    display: flex;
+    min-height: 38px;
+    place-items: initial;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 9px 12px 8px 16px;
+    border-top: 1px solid #edc8d2;
+    background: linear-gradient(90deg, #fde7ed, #fff8fa);
+    color: #713247;
+    font-size: 12px;
+    text-align: left;
+  }
+  .digital-treatment-entry .digital-treatment-sheet > .digital-label:first-child { border-top: 0; }
+  .digital-treatment-entry .digital-main-label {
+    min-height: 42px;
+    flex-direction: row;
+    justify-content: space-between;
+    background: linear-gradient(100deg, #424242, #5e414b);
+    color: #fff;
+  }
+  .digital-treatment-entry .digital-main-label span + span::before {
+    content: '/';
+    margin-right: 18px;
+    color: #ff8eb6;
+  }
+  .digital-treatment-entry .digital-cell:not(.digital-label) { border-bottom: 1px solid #f1d5dd; }
+  .digital-treatment-entry .digital-cell input,
+  .digital-treatment-entry .digital-cell textarea {
+    min-height: 52px;
+    padding: 12px;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    font-size: 16px;
+  }
+  .digital-treatment-entry .digital-main-input {
+    display: grid;
+    grid-template-rows: minmax(112px, auto) auto minmax(112px, auto) auto;
+    background: #fff;
+  }
+  .digital-treatment-entry .digital-main-input textarea { min-height: 112px; }
+  .digital-treatment-entry .treatment-suggestions { padding: 9px 10px 11px; }
+  .digital-treatment-entry .treatment-suggestion-buttons {
+    display: flex;
+    grid-template-columns: none;
+    flex-wrap: nowrap;
+    gap: 7px;
+    overflow-x: auto;
+    padding-bottom: 3px;
+    scrollbar-width: thin;
+  }
+  .digital-treatment-entry .treatment-suggestion-chip {
+    flex: 0 0 auto;
+    width: auto;
+    min-height: 40px;
+    padding: 9px 12px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .digital-treatment-entry .digital-face-cell {
+    min-height: 390px;
+    padding: 11px 8px 8px;
+    border-top: 4px solid #fde4eb;
+    background: radial-gradient(circle at 50% 48%, #fff 0 56%, #fff3f6 100%);
+  }
+  .digital-treatment-entry .digital-face-toolbar { padding: 0 4px 8px; }
+  .digital-treatment-entry .lycon-face-diagram,
+  .digital-treatment-entry .lycon-foot-diagram,
+  .digital-treatment-entry .lycon-body-diagram { top: 48px; width: min(92%, 310px); height: 300px; }
+  .digital-treatment-entry .digital-face-canvas,
+  .digital-treatment-entry .digital-foot-canvas,
+  .digital-treatment-entry .digital-body-canvas { width: min(92%, 310px); height: 300px; }
+  .digital-treatment-entry .digital-comment { min-height: 96px; }
+  .digital-treatment-entry .foot-treatment-title {
+    margin: 20px 0 8px;
+    padding: 10px 12px;
+    font-size: 17px;
+  }
+  .digital-treatment-entry .treatment-entry-actions {
+    bottom: 0;
+    margin: 12px -8px -18px;
+    padding: 10px 8px;
+    border-top: 1px solid #e7bec9;
+    background: rgba(255,255,255,.97);
+    box-shadow: 0 -6px 18px rgba(66,66,66,.08);
+  }
+  .digital-treatment-entry .treatment-entry-actions button { min-height: 50px; }
+}
+
+/* Language switching is desktop-only; keep compact devices focused on work. */
+@media (max-width: 1024px) {
+  html .language-switch,
+  body:has(#app:not(.hidden)) .language-switch {
+    display: none !important;
   }
 }

@@ -179,7 +179,7 @@
 .facial-clear-drawing { position: absolute; z-index: 4; right: 1.5%; top: 13%; padding: 5px 8px; background: rgba(255,255,255,.9); font-size: 11px; }
 .facial-drawing-help { margin: 8px 0 0; color: var(--muted); font-size: 12px; text-align: right; }
 .digital-treatment-entry { overflow-x: auto; }
-.digital-treatment-sheet { display: grid; grid-template-columns: 110px minmax(300px,1.2fr) 110px minmax(240px,.9fr); grid-template-rows: 58px minmax(390px,auto) 90px 58px; min-width: 850px; border: 2px solid #424242; border-radius: 18px; overflow: hidden; background: #424242; gap: 1px; }
+.digital-treatment-sheet { display: grid; grid-template-columns: 110px minmax(300px,1.2fr) 110px minmax(240px,.9fr); grid-template-rows: 58px minmax(390px,auto) 90px minmax(58px,auto); min-width: 850px; border: 2px solid #424242; border-radius: 18px; overflow: hidden; background: #424242; gap: 1px; }
 .digital-cell { min-width: 0; background: #fff; }
 .digital-label { display: grid; place-items: center; padding: 10px; color: #424242; font-weight: 700; text-align: center; }
 .digital-cell input,.digital-cell textarea { width: 100%; height: 100%; margin: 0; padding: 12px; border: 0; border-radius: 0; background: #fff; box-shadow: none; resize: none; }
@@ -191,6 +191,13 @@
 .treatment-suggestion-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
 .treatment-suggestion-chip { border: 1px solid #dcaaba; border-radius: 999px; padding: 7px 10px; background: #fff; color: #8d4057; font-size: 12px; font-weight: 700; text-align: left; }
 .treatment-suggestion-chip:hover,.treatment-suggestion-chip.selected { border-color: #cc455e; background: #cc455e; color: #fff; }
+.digital-cell:has(> .retail-history-suggestions) { display: grid; grid-template-rows: 58px auto; align-content: start; }
+.digital-cell:has(> .retail-history-suggestions) > input { height: 58px; }
+.retail-history-suggestions { border-top: 1px solid #edc8d2; }
+.retail-product-suggestions { border-top: 1px solid #ead7b6; background: #fffaf2 !important; }
+.retail-product-suggestions > small { color: #76531f; }
+.retail-product-suggestions .treatment-suggestion-chip { border-color: #d5b374; background: #fffdf7; color: #66481b; }
+.retail-product-suggestions .treatment-suggestion-chip:hover { border-color: #cc455e; color: #fff; }
 .digital-face-cell { grid-column: 3 / 5; grid-row: 2; position: relative; display: grid; grid-template-rows: auto 1fr auto; place-items: center; padding: 10px; overflow: hidden; }
 .digital-face-toolbar { width: 100%; display: flex; justify-content: space-between; align-items: center; }
 .digital-face-toolbar .ghost { padding: 6px 9px; font-size: 11px; }
@@ -878,7 +885,7 @@ main ul, main ol { list-style: none !important; padding-left: 0 !important; }
   }
   .digital-treatment-entry .digital-treatment-sheet {
     grid-template-columns: 88px minmax(180px, 1fr) 88px minmax(170px, .85fr);
-    grid-template-rows: 58px minmax(340px, auto) 92px 58px;
+    grid-template-rows: 58px minmax(340px, auto) 92px minmax(58px, auto);
     min-width: 0;
     width: 100%;
     border-radius: 13px;
@@ -989,21 +996,20 @@ main ul, main ol { list-style: none !important; padding-left: 0 !important; }
   .digital-treatment-entry .digital-main-input textarea { min-height: 112px; }
   .digital-treatment-entry .treatment-suggestions { padding: 9px 10px 11px; }
   .digital-treatment-entry .treatment-suggestion-buttons {
-    display: flex;
-    grid-template-columns: none;
-    flex-wrap: nowrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 7px;
-    overflow-x: auto;
-    padding-bottom: 3px;
-    scrollbar-width: thin;
+    overflow-x: visible;
+    padding-bottom: 0;
   }
   .digital-treatment-entry .treatment-suggestion-chip {
-    flex: 0 0 auto;
-    width: auto;
-    min-height: 40px;
-    padding: 9px 12px;
-    border-radius: 999px;
-    white-space: nowrap;
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
   .digital-treatment-entry .digital-face-cell {
     min-height: 390px;

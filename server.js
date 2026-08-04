@@ -80,6 +80,7 @@ const tenantRows = (name, user) => db[name].filter(x => x.tenantId === user.tena
 const companyTenantIds = user => { const tenant=db.tenants.find(row=>row.id===user.tenantId); if(!tenant?.companyName)return [user.tenantId]; return db.tenants.filter(row=>row.companyName===tenant.companyName).map(row=>row.id); };
 const companyRows = (name, user) => { const tenantIds=companyTenantIds(user); return db[name].filter(row=>tenantIds.includes(row.tenantId)); };
 const id = prefix => prefix + crypto.randomUUID().slice(0, 8);
+const retailProductNames = (...sources) => [...new Set(sources.flatMap(source => Array.isArray(source) ? source : [source]).flatMap(value => String(value || '').split(/[\n,、／]+/)).map(value => value.replace(/^物販:\s*/, '').trim().slice(0, 200)).filter(Boolean))].slice(0, 50);
 
 function safeUser(user) { const { password, passwordHash, ...rest } = user; return { ...rest, tenant: db.tenants.find(t => t.id === user.tenantId) }; }
 function loginAllowed(ip) { const now = Date.now(), recent = (loginAttempts.get(ip) || []).filter(t => now - t < 15 * 60_000); loginAttempts.set(ip, recent); return recent.length < 10; }
@@ -345,6 +346,7 @@ async function api(req, res, pathname) {
     const deleted = { customers: db.customers.length, records: db.records.length };
     db.customers = [];
     db.records = [];
+    db.retailPurchases = [];
     await save();
     return json(res, 200, { deleted, remaining: { customers: 0, records: 0 } });
   }
@@ -500,6 +502,7 @@ async function api(req, res, pathname) {
     const recordsDeleted = db.records.filter(row => row.customerId === customerId && row.tenantId === tenantId).length;
     db.customers = db.customers.filter(row => row.id !== customerId || row.tenantId !== tenantId);
     db.records = db.records.filter(row => row.customerId !== customerId || row.tenantId !== tenantId);
+    db.retailPurchases = (db.retailPurchases || []).filter(row => row.customerId !== customerId || row.tenantId !== tenantId);
     await save();
     return json(res, 200, { deleted: { id: customer.id, name: customer.name, recordsDeleted } });
   }
@@ -542,6 +545,7 @@ async function api(req, res, pathname) {
     db.users = db.users.filter(row => row.tenantId !== tenantId || row.role === 'system_admin');
     db.customers = db.customers.filter(row => row.tenantId !== tenantId);
     db.records = db.records.filter(row => row.tenantId !== tenantId);
+    db.retailPurchases = (db.retailPurchases || []).filter(row => row.tenantId !== tenantId);
     db.templates = db.templates.filter(row => row.tenantId !== tenantId);
     await save();
     return json(res, 200, { deleted: { id: tenant.id, name: tenant.name, ...removed } });
@@ -644,7 +648,35 @@ async function api(req, res, pathname) {
       .sort((a, b) => String(b.visitDate || '').localeCompare(String(a.visitDate || '')));
     return json(res, 200, records);
   }
-  if (pathname === '/api/records' && req.method === 'POST') { const b = await body(req); const customer = tenantRows('customers', user).find(c => c.id === b.customerId); if (!customer) return json(res, 400, { error: '顧客を選択してください' }); const images = (Array.isArray(b.images) ? b.images : [b.image]).filter(image => /^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(String(image || ''))).slice(0, 3); if (images.some(image => image.length > 4_000_000)) return json(res, 413, { error: '1枚あたりの画像容量が大きすぎます。撮影または選択し直してください' }); const chartGender = ['male', 'female', 'common'].includes(b.chartGender) ? b.chartGender : ''; const recordType = ['registration_sheet', 'treatment_entry'].includes(b.recordType) ? b.recordType : (db.records.some(record => record.customerId === customer.id) ? 'treatment_entry' : 'registration_sheet'); const row = { id: id('r'), tenantId: user.tenantId, customerId: customer.id, visitDate: b.visitDate || new Date().toISOString().slice(0,10), staff: user.name, templateId: b.templateId, chartGender, recordType, values: b.values || {}, alerts: b.alerts || [], note: b.note || '', images, createdAt: new Date().toISOString() }; db.records.push(row); customer.lastVisit = row.visitDate; if (['male', 'female'].includes(chartGender) && !customer.gender) customer.gender = chartGender; customer.alerts = [...new Set([...(customer.alerts || []), ...row.alerts])]; await save(); return json(res, 201, row); }
+  if (pathname === '/api/retail-purchases' && req.method === 'GET') {
+    const tenantIds = companyTenantIds(user);
+    const customerId = new URL(req.url, `http://${req.headers.host}`).searchParams.get('customerId');
+    const purchases = (db.retailPurchases || [])
+      .filter(purchase => tenantIds.includes(purchase.tenantId) && (!customerId || purchase.customerId === customerId))
+      .sort((a, b) => String(b.purchasedAt || b.createdAt || '').localeCompare(String(a.purchasedAt || a.createdAt || '')));
+    return json(res, 200, purchases);
+  }
+  if (pathname === '/api/records' && req.method === 'POST') {
+    const b = await body(req);
+    const customer = tenantRows('customers', user).find(c => c.id === b.customerId);
+    if (!customer) return json(res, 400, { error: '顧客を選択してください' });
+    const images = (Array.isArray(b.images) ? b.images : [b.image]).filter(image => /^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(String(image || ''))).slice(0, 3);
+    if (images.some(image => image.length > 4_000_000)) return json(res, 413, { error: '1枚あたりの画像容量が大きすぎます。撮影または選択し直してください' });
+    const chartGender = ['male', 'female', 'common'].includes(b.chartGender) ? b.chartGender : '';
+    const recordType = ['registration_sheet', 'treatment_entry'].includes(b.recordType) ? b.recordType : (db.records.some(record => record.customerId === customer.id) ? 'treatment_entry' : 'registration_sheet');
+    const visitDate = b.visitDate || new Date().toISOString().slice(0,10), createdAt = new Date().toISOString();
+    const row = { id: id('r'), tenantId: user.tenantId, customerId: customer.id, visitDate, staff: user.name, templateId: b.templateId, chartGender, recordType, values: b.values || {}, alerts: b.alerts || [], note: b.note || '', images, createdAt };
+    const purchases = retailProductNames(b.retailPurchases, row.values.retail).map(productName => ({ id: id('rp'), tenantId: user.tenantId, customerId: customer.id, recordId: row.id, productName, purchasedAt: visitDate, staff: user.name, createdAt }));
+    row.retailPurchases = purchases;
+    db.records.push(row);
+    db.retailPurchases ||= [];
+    db.retailPurchases.push(...purchases);
+    customer.lastVisit = row.visitDate;
+    if (['male', 'female'].includes(chartGender) && !customer.gender) customer.gender = chartGender;
+    customer.alerts = [...new Set([...(customer.alerts || []), ...row.alerts])];
+    await save();
+    return json(res, 201, row);
+  }
   return json(res, 404, { error: 'APIが見つかりません' });
 }
 
